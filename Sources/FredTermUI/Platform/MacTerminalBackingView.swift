@@ -315,6 +315,25 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
         }
     }
 
+    // MARK: - Find Panel
+
+    /// Callback invoked when the user triggers Cmd+F (or Edit > Find).
+    /// Set by the SwiftUI TerminalView to toggle the find bar.
+    public var onPerformFindPanelAction: (() -> Void)?
+
+    /// Handle standard find panel actions (Cmd+F, Cmd+G, etc.).
+    @objc public func performFindPanelAction(_ sender: Any?) {
+        onPerformFindPanelAction?()
+    }
+
+    /// Override to include find in the responder chain.
+    public override func responds(to aSelector: Selector!) -> Bool {
+        if aSelector == #selector(performFindPanelAction(_:)) {
+            return true
+        }
+        return super.responds(to: aSelector)
+    }
+
     // MARK: - Helpers
 
     /// Convert a mouse event location to a terminal grid position.

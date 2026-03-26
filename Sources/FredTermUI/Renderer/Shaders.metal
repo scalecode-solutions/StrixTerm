@@ -126,6 +126,48 @@ fragment float4 glyphFragment(
     return float4(in.color.rgb, in.color.a * alpha);
 }
 
+// MARK: - Decoration/Overlay Pass
+
+/// Per-quad data for decorations (underlines, strikethrough, overline) and selection overlays.
+/// Uses pixel coordinates rather than cell grid positions for sub-cell precision.
+struct DecorationData {
+    float2 pixelPosition;    // Top-left corner in pixels
+    float2 pixelSize;        // Width and height in pixels
+    float4 color;            // RGBA color
+};
+
+/// Vertex output for the decoration pass (reuses BackgroundVertex layout).
+vertex BackgroundVertex decorationVertex(
+    uint vertexID [[vertex_id]],
+    uint instanceID [[instance_id]],
+    constant DecorationData *decorations [[buffer(0)]],
+    constant Uniforms &uniforms [[buffer(1)]]
+) {
+    DecorationData dec = decorations[instanceID];
+
+    // Quad vertices (2 triangles = 6 vertices)
+    float2 positions[6] = {
+        float2(0, 0), float2(1, 0), float2(0, 1),
+        float2(1, 0), float2(1, 1), float2(0, 1)
+    };
+
+    float2 pos = positions[vertexID];
+    float2 worldPos = dec.pixelPosition + pos * dec.pixelSize;
+
+    // Convert to NDC
+    float2 ndc = worldPos / uniforms.viewportSize * 2.0 - 1.0;
+    ndc.y = -ndc.y; // Flip Y
+
+    BackgroundVertex out;
+    out.position = float4(ndc, 0, 1);
+    out.color = dec.color;
+    return out;
+}
+
+fragment float4 decorationFragment(BackgroundVertex in [[stage_in]]) {
+    return in.color;
+}
+
 // MARK: - Cursor Pass
 
 struct CursorUniforms {

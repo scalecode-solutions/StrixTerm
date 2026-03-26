@@ -66,6 +66,15 @@ struct CellStyleFlags {
     static let inverse: UInt32       = 1 << 5
     static let invisible: UInt32     = 1 << 6
     static let strikethrough: UInt32 = 1 << 7
+    static let overline: UInt32      = 1 << 8
+}
+
+/// GPU data for decoration quads (underlines, strikethrough, overline, selection).
+/// Must match the Metal `DecorationData` struct in Shaders.metal.
+struct GPUDecorationData {
+    var pixelPosition: SIMD2<Float>  // Top-left corner in pixels
+    var pixelSize: SIMD2<Float>      // Width and height in pixels
+    var color: SIMD4<Float>          // RGBA color
 }
 
 // MARK: - MetalRenderer
@@ -83,6 +92,7 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
     private let commandQueue: MTLCommandQueue
     private let backgroundPipeline: MTLRenderPipelineState
     private let glyphPipeline: MTLRenderPipelineState
+    private let decorationPipeline: MTLRenderPipelineState
     private let cursorPipeline: MTLRenderPipelineState
 
     // MARK: - Glyph System
@@ -124,8 +134,14 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
 
     private var cellDataBuffer: MTLBuffer?
     private var glyphCellDataBuffer: MTLBuffer?
+    private var decorationDataBuffer: MTLBuffer?
     private var uniformBuffer: MTLBuffer?
     private var cursorUniformBuffer: MTLBuffer?
+
+    // MARK: - Selection State
+
+    /// The current selection, if any. Set by the view layer to enable selection highlighting.
+    public var selection: Selection = Selection()
 
     // MARK: - Init
 
@@ -166,12 +182,14 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
 
         guard let bgPipeline = Self.makeBackgroundPipeline(device: device, library: library),
               let glPipeline = Self.makeGlyphPipeline(device: device, library: library),
+              let decPipeline = Self.makeDecorationPipeline(device: device, library: library),
               let cuPipeline = Self.makeCursorPipeline(device: device, library: library) else {
             return nil
         }
 
         self.backgroundPipeline = bgPipeline
         self.glyphPipeline = glPipeline
+        self.decorationPipeline = decPipeline
         self.cursorPipeline = cuPipeline
 
         // Pre-allocate uniform buffers.
@@ -233,8 +251,12 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
 
         var bgCells: [GPUCellData] = []
         var glyphCells: [GPUCellData] = []
+        var decorationQuads: [GPUDecorationData] = []
         bgCells.reserveCapacity(cols * rows)
         glyphCells.reserveCapacity(cols * rows)
+
+        let cw = Float(cellWidth)
+        let ch = Float(cellHeight)
 
         for row in 0..<rows {
             for col in 0..<cols {
@@ -259,6 +281,7 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
                 if attr.style.contains(.inverse) { styleFlags |= CellStyleFlags.inverse }
                 if attr.style.contains(.invisible) { styleFlags |= CellStyleFlags.invisible }
                 if attr.style.contains(.strikethrough) { styleFlags |= CellStyleFlags.strikethrough }
+                if attr.style.contains(.overline) { styleFlags |= CellStyleFlags.overline }
 
                 // Handle inverse video.
                 if attr.style.contains(.inverse) {
@@ -292,12 +315,97 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
                     bgCells.append(bgData)
                 }
 
+                // Selection overlay: render a semi-transparent blue highlight
+                // for each cell in the effective width of this character.
+                if selection.active {
+                    for w in 0..<effectiveWidth {
+                        let pos = Position(col: col + w, row: row)
+                        if selection.contains(pos) {
+                            let selectionColor = SIMD4<Float>(0.3, 0.5, 0.9, 0.35)
+                            let px = Float(col + w) * cw
+                            let py = Float(row) * ch
+                            decorationQuads.append(GPUDecorationData(
+                                pixelPosition: SIMD2<Float>(px, py),
+                                pixelSize: SIMD2<Float>(cw, ch),
+                                color: selectionColor
+                            ))
+                        }
+                    }
+                }
+
+                // Build decoration quads for underline, strikethrough, and overline.
+                let decoWidth = Float(effectiveWidth) * cw
+                let cellPx = Float(col) * cw
+                let cellPy = Float(row) * ch
+
+                // Determine the decoration color: use underlineColor if set, otherwise fg.
+                let decoColor: SIMD4<Float>
+                if let ulColor = attr.underlineColor {
+                    decoColor = resolveColor(ulColor, palette: snapshot.palette, isDefault: true)
+                } else {
+                    decoColor = fgColor
+                }
+
+                // Underline decoration.
+                if attr.style.contains(.underline) || attr.underlineStyle != .none {
+                    let ulStyle = attr.underlineStyle != .none ? attr.underlineStyle : .single
+                    buildUnderlineQuads(
+                        style: ulStyle,
+                        x: cellPx, y: cellPy,
+                        width: decoWidth, cellHeight: ch,
+                        color: decoColor,
+                        into: &decorationQuads
+                    )
+                }
+
+                // Strikethrough decoration.
+                if attr.style.contains(.strikethrough) {
+                    let strikeY = cellPy + ch * 0.5
+                    decorationQuads.append(GPUDecorationData(
+                        pixelPosition: SIMD2<Float>(cellPx, strikeY),
+                        pixelSize: SIMD2<Float>(decoWidth, 1),
+                        color: fgColor
+                    ))
+                }
+
+                // Overline decoration.
+                if attr.style.contains(.overline) {
+                    decorationQuads.append(GPUDecorationData(
+                        pixelPosition: SIMD2<Float>(cellPx, cellPy),
+                        pixelSize: SIMD2<Float>(decoWidth, 1),
+                        color: fgColor
+                    ))
+                }
+
                 // Skip invisible cells or blank spaces for glyph rendering.
                 if attr.style.contains(.invisible) || cell.isBlank {
                     continue
                 }
 
-                // Look up or rasterize the glyph.
+                // Check if this is a box drawing / block element character.
+                if BoxDrawingRenderer.isBoxDrawingCharacter(cell.codePoint) {
+                    if let entry = lookupOrRasterizeBoxDrawing(codePoint: cell.codePoint) {
+                        let atlas = grayscaleAtlas
+                        let (uvX, uvY) = entry.region.uvOffset(
+                            atlasWidth: atlas.atlasWidth,
+                            atlasHeight: atlas.atlasHeight
+                        )
+
+                        let glyphData = GPUCellData(
+                            position: SIMD2<UInt32>(UInt32(col), UInt32(row)),
+                            fgColor: fgColor,
+                            bgColor: bgColor,
+                            glyphIndex: 1,
+                            flags: styleFlags,
+                            glyphSize: SIMD2<Float>(Float(entry.region.width), Float(entry.region.height)),
+                            glyphOffset: SIMD2<Float>(uvX, uvY)
+                        )
+                        glyphCells.append(glyphData)
+                    }
+                    continue
+                }
+
+                // Look up or rasterize the glyph from the font.
                 let glyphKey = GlyphKey(
                     codePoint: cell.codePoint,
                     isBold: attr.style.contains(.bold),
@@ -345,6 +453,17 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
             options: .storageModeShared
         )
 
+        if !decorationQuads.isEmpty {
+            let decDataSize = MemoryLayout<GPUDecorationData>.stride * decorationQuads.count
+            decorationDataBuffer = device.makeBuffer(
+                bytes: decorationQuads,
+                length: decDataSize,
+                options: .storageModeShared
+            )
+        } else {
+            decorationDataBuffer = nil
+        }
+
         // Update uniforms.
         var uniforms = GPUUniforms(
             cellSize: SIMD2<Float>(Float(cellWidth), Float(cellHeight)),
@@ -379,6 +498,27 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
                 vertexStart: 0,
                 vertexCount: 6,
                 instanceCount: bgCells.count
+            )
+        }
+
+        // Selection and decoration overlay pass (between background and glyphs).
+        // Selection quads are included in decorationQuads but rendered before glyphs
+        // so that text remains visible on top of the highlight.
+        if !decorationQuads.isEmpty, let decBuffer = decorationDataBuffer {
+            // Split: render selection overlays now (before glyphs).
+            // Selection quads were added first in the array, but for simplicity
+            // we render all decoration quads in a single pass after glyphs.
+            // Actually, selection should be between bg and glyphs, decorations after glyphs.
+            // We'll render all decorations here as a single pass. Selection has alpha
+            // blending so text will still be visible.
+            encoder.setRenderPipelineState(decorationPipeline)
+            encoder.setVertexBuffer(decBuffer, offset: 0, index: 0)
+            encoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
+            encoder.drawPrimitives(
+                type: .triangle,
+                vertexStart: 0,
+                vertexCount: 6,
+                instanceCount: decorationQuads.count
             )
         }
 
@@ -619,8 +759,160 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
     /// Clear the glyph cache (e.g. after a font change).
     public func clearGlyphCache() {
         glyphCache.removeAll()
+        boxDrawingCache.removeAll()
         grayscaleAtlas.reset()
         colorAtlas.reset()
+    }
+
+    // MARK: - Decoration Pipeline Construction
+
+    private static func makeDecorationPipeline(
+        device: MTLDevice,
+        library: MTLLibrary
+    ) -> MTLRenderPipelineState? {
+        guard let vertexFunc = library.makeFunction(name: "decorationVertex"),
+              let fragmentFunc = library.makeFunction(name: "decorationFragment") else {
+            return nil
+        }
+
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = vertexFunc
+        descriptor.fragmentFunction = fragmentFunc
+        descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+
+        // Enable alpha blending for decorations (selection uses translucency).
+        descriptor.colorAttachments[0].isBlendingEnabled = true
+        descriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        descriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
+        descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+
+        return try? device.makeRenderPipelineState(descriptor: descriptor)
+    }
+
+    // MARK: - Underline Quad Generation
+
+    /// Build decoration quads for the various underline styles.
+    private func buildUnderlineQuads(
+        style: UnderlineStyle,
+        x: Float,
+        y: Float,
+        width: Float,
+        cellHeight ch: Float,
+        color: SIMD4<Float>,
+        into quads: inout [GPUDecorationData]
+    ) {
+        // Underline is drawn near the bottom of the cell.
+        let baselineY = y + ch - 2
+
+        switch style {
+        case .none:
+            break
+
+        case .single:
+            // Solid 1px line at the bottom of the cell.
+            quads.append(GPUDecorationData(
+                pixelPosition: SIMD2<Float>(x, baselineY),
+                pixelSize: SIMD2<Float>(width, 1),
+                color: color
+            ))
+
+        case .double:
+            // Two 1px lines with a 1px gap.
+            quads.append(GPUDecorationData(
+                pixelPosition: SIMD2<Float>(x, baselineY - 2),
+                pixelSize: SIMD2<Float>(width, 1),
+                color: color
+            ))
+            quads.append(GPUDecorationData(
+                pixelPosition: SIMD2<Float>(x, baselineY),
+                pixelSize: SIMD2<Float>(width, 1),
+                color: color
+            ))
+
+        case .curly:
+            // Approximate a wavy/curly line with a series of small quads
+            // forming a sine-wave pattern.
+            let segmentWidth: Float = 4
+            let amplitude: Float = 1.5
+            var cx = x
+            while cx < x + width {
+                let segW = min(segmentWidth, x + width - cx)
+                let phase = (cx - x).truncatingRemainder(dividingBy: segmentWidth * 2)
+                let dy: Float = phase < segmentWidth ? -amplitude : amplitude
+                quads.append(GPUDecorationData(
+                    pixelPosition: SIMD2<Float>(cx, baselineY + dy),
+                    pixelSize: SIMD2<Float>(segW, 1),
+                    color: color
+                ))
+                cx += segW
+            }
+
+        case .dotted:
+            // Dotted line: 1px dots with 1px gaps.
+            var cx = x
+            while cx < x + width {
+                let dotW: Float = min(1, x + width - cx)
+                quads.append(GPUDecorationData(
+                    pixelPosition: SIMD2<Float>(cx, baselineY),
+                    pixelSize: SIMD2<Float>(dotW, 1),
+                    color: color
+                ))
+                cx += 2 // 1px dot + 1px gap
+            }
+
+        case .dashed:
+            // Dashed line: 4px dashes with 2px gaps.
+            var cx = x
+            while cx < x + width {
+                let dashW: Float = min(4, x + width - cx)
+                quads.append(GPUDecorationData(
+                    pixelPosition: SIMD2<Float>(cx, baselineY),
+                    pixelSize: SIMD2<Float>(dashW, 1),
+                    color: color
+                ))
+                cx += 6 // 4px dash + 2px gap
+            }
+        }
+    }
+
+    // MARK: - Box Drawing Cache
+
+    /// Cache for programmatically rendered box drawing / block element glyphs.
+    private var boxDrawingCache: [UInt32: GlyphEntry] = [:]
+
+    /// Look up or rasterize a box drawing character.
+    private func lookupOrRasterizeBoxDrawing(codePoint: UInt32) -> GlyphEntry? {
+        if let cached = boxDrawingCache[codePoint] {
+            return cached
+        }
+
+        guard let rasterized = BoxDrawingRenderer.rasterize(
+            codePoint: codePoint,
+            cellWidth: Int(cellWidth),
+            cellHeight: Int(cellHeight)
+        ) else {
+            return nil
+        }
+
+        guard let region = grayscaleAtlas.reserve(
+            width: rasterized.width,
+            height: rasterized.height
+        ) else {
+            return nil
+        }
+
+        grayscaleAtlas.write(region: region, data: rasterized.data)
+
+        let entry = GlyphEntry(
+            region: region,
+            bearingX: Float(rasterized.bearingX),
+            bearingY: Float(rasterized.bearingY),
+            isColored: false
+        )
+
+        boxDrawingCache[codePoint] = entry
+        return entry
     }
 }
 

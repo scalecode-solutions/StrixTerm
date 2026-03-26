@@ -218,6 +218,37 @@ public final class Terminal: @unchecked Sendable {
         }
     }
 
+    // MARK: - Search
+
+    /// Search the terminal buffer for matches of the given query.
+    public func search(query: String, options: SearchOptions = SearchOptions()) -> [SearchResult] {
+        lock.lock()
+        defer { lock.unlock() }
+        return SearchEngine.search(
+            query: query,
+            in: state.buffer.grid,
+            graphemes: state.graphemes,
+            options: options
+        )
+    }
+
+    /// Scroll the display so that the given absolute line index is visible.
+    public func scrollToLine(_ lineIndex: Int) {
+        lock.lock()
+        let rows = state.rows
+        let yBase = state.buffer.yBase
+        let linesTop = state.buffer.linesTop
+        // The lineIndex is an absolute index in the grid.
+        // yDisp is the first visible line. We want lineIndex to be visible.
+        let targetYDisp = max(yBase - linesTop, min(yBase, lineIndex))
+        if targetYDisp != state.buffer.yDisp {
+            state.buffer.yDisp = targetYDisp
+        }
+        _ = rows
+        lock.unlock()
+        delegate?.terminalNeedsDisplay(self)
+    }
+
     // MARK: - Scroll position
 
     /// The current scroll offset (0 = showing most recent output).

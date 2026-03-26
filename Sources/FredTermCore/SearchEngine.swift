@@ -21,7 +21,7 @@ public struct SearchOptions: Sendable {
 }
 
 /// A single search result.
-public struct SearchResult: Sendable {
+public struct SearchResult: Sendable, Equatable {
     public var startPosition: Position
     public var endPosition: Position
     public var lineIndex: Int
