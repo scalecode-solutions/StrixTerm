@@ -95,6 +95,23 @@ public struct BufferState: @unchecked Sendable {
             }
         }
 
+        // Wide character doesn't fit at end of line - wrap to next line
+        if width == 2 && cursorX + width > rightLimit {
+            if modes.wraparound {
+                let wrapLineIdx = yBase + cursorY
+                grid[lineMetadata: wrapLineIdx] = {
+                    var m = grid[lineMetadata: wrapLineIdx]
+                    m.isWrapped = true
+                    return m
+                }()
+                cursorX = modes.marginMode ? marginLeft : 0
+                linefeed(modes: modes)
+            } else {
+                cursorX = rightLimit - 2
+                if cursorX < 0 { cursorX = 0 }
+            }
+        }
+
         let newLineIdx = yBase + cursorY
 
         // Insert mode: shift existing cells right
@@ -205,6 +222,31 @@ public struct BufferState: @unchecked Sendable {
                 grid.clearLine(yBase + line, fillAttribute: fillAttribute)
             }
         case 3: // Erase scrollback
+            if yBase > 0 {
+                // Copy visible lines to a temporary buffer
+                var visibleCells = [[Cell]]()
+                var visibleMeta = [LineMetadata]()
+                for row in 0..<rows {
+                    let lineIdx = yBase + row
+                    var lineCells = [Cell]()
+                    for col in 0..<cols {
+                        lineCells.append(grid[lineIdx, col])
+                    }
+                    visibleCells.append(lineCells)
+                    visibleMeta.append(grid[lineMetadata: lineIdx])
+                }
+                // Reset the grid: clear all and rewrite visible lines
+                let maxLines = grid.maxLines
+                grid.deallocate()
+                grid = CellGrid(cols: cols, maxLines: maxLines)
+                for row in 0..<rows {
+                    grid.appendLine()
+                    for col in 0..<cols {
+                        grid[row, col] = visibleCells[row][col]
+                    }
+                    grid[lineMetadata: row] = visibleMeta[row]
+                }
+            }
             yBase = 0
             yDisp = 0
             linesTop = 0
@@ -248,6 +290,29 @@ public struct BufferState: @unchecked Sendable {
 
     public func restoreCursor() -> SavedCursorState {
         return savedCursor
+    }
+
+    // MARK: - Clear
+
+    /// Clear the buffer completely, resetting cursor and scroll state.
+    /// Used when deactivating the alternate buffer.
+    public mutating func clearBuffer(rows: Int, cols: Int) {
+        cursorX = 0
+        cursorY = 0
+        yBase = 0
+        yDisp = 0
+        linesTop = 0
+        scrollTop = 0
+        scrollBottom = rows - 1
+        marginLeft = 0
+        marginRight = cols - 1
+        savedCursor = SavedCursorState()
+        for line in 0..<rows {
+            if line < grid.count {
+                grid.clearLine(line)
+                grid[lineMetadata: line] = .blank
+            }
+        }
     }
 
     // MARK: - Deallocation

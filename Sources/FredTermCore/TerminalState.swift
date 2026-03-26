@@ -17,7 +17,20 @@ public struct TerminalState: @unchecked Sendable {
     public var cursorAttribute: UInt32 = 0
     public var cursorStyle: CursorStyle = .blinkBlock
     public var modes: TerminalModes = TerminalModes()
-    public var keyboard: KeyboardState = KeyboardState()
+    public var keyboardNormal: KeyboardState = KeyboardState()
+    public var keyboardAlt: KeyboardState = KeyboardState()
+
+    /// The keyboard state for the currently active screen buffer.
+    public var keyboard: KeyboardState {
+        get { activeBufferIsAlt ? keyboardAlt : keyboardNormal }
+        set {
+            if activeBufferIsAlt {
+                keyboardAlt = newValue
+            } else {
+                keyboardNormal = newValue
+            }
+        }
+    }
     public var palette: ColorPalette = .xterm
     public var promptState: SemanticPromptState = SemanticPromptState()
 
@@ -38,7 +51,7 @@ public struct TerminalState: @unchecked Sendable {
         self.cols = cols
         self.rows = rows
         self.maxScrollback = maxScrollback
-        normalBuffer = BufferState(cols: cols, rows: rows, maxScrollback: maxScrollback, hasScrollback: true)
+        normalBuffer = BufferState(cols: cols, rows: rows, maxScrollback: maxScrollback, hasScrollback: maxScrollback > 0)
         altBuffer = BufferState(cols: cols, rows: rows, maxScrollback: 0, hasScrollback: false)
     }
 
@@ -81,13 +94,17 @@ public struct TerminalState: @unchecked Sendable {
         // Resize both buffers
         normalBuffer.grid.resize(newCols: newCols, newRows: newRows,
                                   newMaxLines: newRows + maxScrollback)
+        normalBuffer.scrollTop = 0
         normalBuffer.scrollBottom = newRows - 1
+        normalBuffer.marginLeft = 0
         normalBuffer.marginRight = newCols - 1
         normalBuffer.tabStops.resize(newCols)
 
         altBuffer.grid.resize(newCols: newCols, newRows: newRows,
                                newMaxLines: newRows)
+        altBuffer.scrollTop = 0
         altBuffer.scrollBottom = newRows - 1
+        altBuffer.marginLeft = 0
         altBuffer.marginRight = newCols - 1
         altBuffer.tabStops.resize(newCols)
 
@@ -120,14 +137,24 @@ public struct TerminalState: @unchecked Sendable {
     public mutating func deactivateAltBuffer() {
         guard activeBufferIsAlt else { return }
         activeBufferIsAlt = false
+        // Clear the alt buffer
+        altBuffer.clearBuffer(rows: rows, cols: cols)
         // Restore normal buffer cursor
         let saved = normalBuffer.restoreCursor()
         normalBuffer.cursorX = saved.x
         normalBuffer.cursorY = saved.y
         cursorAttribute = saved.attribute
-        // Reset Kitty keyboard state on RMCUP
-        keyboard.reset()
+        // Note: Do NOT reset keyboard state on RMCUP.
+        // Normal and alt screens maintain separate keyboard state.
         pendingActions.append(.bufferActivated(isAlternate: false))
+    }
+
+    // MARK: - Reset
+
+    /// Full reset to initial state (RIS equivalent, callable from tests).
+    public mutating func resetToInitialState() {
+        // Trigger the same path as ESC c (full reset)
+        feed(Array("\u{1b}c".utf8))
     }
 
     // MARK: - Cleanup
@@ -135,6 +162,30 @@ public struct TerminalState: @unchecked Sendable {
     public mutating func deallocate() {
         normalBuffer.deallocate()
         altBuffer.deallocate()
+    }
+
+    // MARK: - Cell text helpers (for testing and inspection)
+
+    /// Get the character/grapheme cluster for a cell, resolving grapheme table refs.
+    public func cellText(col: Int, row: Int) -> String {
+        let lineIdx = buffer.yBase + row
+        let cell = buffer.grid[lineIdx, col]
+        if GraphemeTable.isGraphemeRef(cell.codePoint) {
+            return graphemes.lookup(cell.codePoint)
+        }
+        return String(cell.character)
+    }
+
+    /// Get the cell at a visible position.
+    public func getCell(col: Int, row: Int) -> Cell {
+        let lineIdx = buffer.yBase + row
+        return buffer.grid[lineIdx, col]
+    }
+
+    /// Get the text of a visible line, resolving grapheme refs.
+    public func lineText(_ row: Int) -> String {
+        let lineIdx = buffer.yBase + row
+        return buffer.grid.lineText(lineIdx, graphemes: graphemes)
     }
 }
 
@@ -175,6 +226,60 @@ extension TerminalState: TerminalEmulator {
             return
         }
 
+        // Skin tone modifiers (Fitzpatrick scale) combine with previous emoji
+        if scalar >= 0x1F3FB && scalar <= 0x1F3FF {
+            handleCombiningCharacter(scalar)
+            return
+        }
+
+        // Regional indicators: if previous cell is also a regional indicator, combine to form a flag
+        if scalar >= 0x1F1E6 && scalar <= 0x1F1FF {
+            let lineIdx = buffer.absoluteCursorY
+            let prevCol = buffer.cursorX > 0 ? buffer.cursorX - 1 : 0
+            // Skip over wide continuation cells to find the base cell
+            var col = prevCol
+            while col > 0 && buffer.grid[lineIdx, col].flags.contains(.wideContinuation) {
+                col -= 1
+            }
+            let prevCell = buffer.grid[lineIdx, col]
+            let prevCP = prevCell.codePoint
+            // Check if previous cell is a single (unpaired) regional indicator
+            let prevIsRI: Bool
+            if GraphemeTable.isGraphemeRef(prevCP) {
+                let str = graphemes.lookup(prevCP)
+                let scalars = Array(str.unicodeScalars)
+                // Already paired (2 regional indicators) - don't combine further
+                prevIsRI = scalars.count == 1 && scalars[0].value >= 0x1F1E6 && scalars[0].value <= 0x1F1FF
+            } else {
+                prevIsRI = prevCP >= 0x1F1E6 && prevCP <= 0x1F1FF
+            }
+            if prevIsRI && buffer.cursorX > 0 {
+                handleCombiningCharacter(scalar)
+                return
+            }
+        }
+
+        // After a ZWJ, the next character should combine with the previous cell
+        if buffer.cursorX > 0 {
+            let lineIdx = buffer.absoluteCursorY
+            var col = buffer.cursorX - 1
+            while col > 0 && buffer.grid[lineIdx, col].flags.contains(.wideContinuation) {
+                col -= 1
+            }
+            let prevCell = buffer.grid[lineIdx, col]
+            let prevCP = prevCell.codePoint
+            if GraphemeTable.isGraphemeRef(prevCP) {
+                let str = graphemes.lookup(prevCP)
+                if let lastScalar = str.unicodeScalars.last, lastScalar.value == 0x200D {
+                    handleCombiningCharacter(scalar)
+                    return
+                }
+            } else if prevCP == 0x200D {
+                handleCombiningCharacter(scalar)
+                return
+            }
+        }
+
         let width = UnicodeWidth.width(of: scalar)
         let cell = Cell(
             codePoint: scalar,
@@ -187,6 +292,8 @@ extension TerminalState: TerminalEmulator {
     }
 
     /// Handle a combining character by appending to the previous cell.
+    /// Also handles VS16 (U+FE0F) which upgrades width to 2,
+    /// and VS15 (U+FE0E) which downgrades width to 1.
     private mutating func handleCombiningCharacter(_ scalar: UInt32) {
         let lineIdx = buffer.absoluteCursorY
         var col = buffer.cursorX > 0 ? buffer.cursorX - 1 : 0
@@ -218,6 +325,41 @@ extension TerminalState: TerminalEmulator {
         }
 
         cell.codePoint = graphemes.insert(combinedStr)
+
+        // Handle variation selectors that change width
+        let oldWidth = cell.width
+        if scalar == 0xFE0F {
+            // VS16 (emoji presentation) - upgrade to width 2 if currently 1
+            if oldWidth == 1 {
+                cell.width = 2
+                buffer.grid[lineIdx, col] = cell
+                // Insert continuation cell
+                if col + 1 < cols {
+                    var cont = Cell.blank
+                    cont.attribute = cell.attribute
+                    cont.flags = .wideContinuation
+                    cont.width = 0
+                    buffer.grid[lineIdx, col + 1] = cont
+                    // Shift cursor to account for the new width
+                    buffer.cursorX = col + 2
+                }
+                return
+            }
+        } else if scalar == 0xFE0E {
+            // VS15 (text presentation) - downgrade to width 1 if currently 2
+            if oldWidth == 2 {
+                cell.width = 1
+                buffer.grid[lineIdx, col] = cell
+                // Clear the old continuation cell
+                if col + 1 < cols {
+                    buffer.grid[lineIdx, col + 1] = Cell.blank
+                }
+                // Adjust cursor position
+                buffer.cursorX = col + 1
+                return
+            }
+        }
+
         buffer.grid[lineIdx, col] = cell
     }
 
@@ -231,6 +373,9 @@ extension TerminalState: TerminalEmulator {
         case 0x08: // BS - backspace
             if buffer.cursorX > 0 {
                 buffer.cursorX -= 1
+            } else if modes.reverseWraparound && modes.wraparound && buffer.cursorY > 0 {
+                buffer.cursorY -= 1
+                buffer.cursorX = cols - 1
             }
         case 0x09: // HT - horizontal tab
             let nextTab = buffer.tabStops.nextStop(after: buffer.cursorX)

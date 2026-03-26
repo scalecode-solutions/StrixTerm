@@ -7,20 +7,20 @@ extension TerminalState {
         final: UInt8, data: [UInt8]
     ) {
         switch final {
-        case 0x71: // 'q' - Sixel graphics
+        case 0x71 where intermediates.count == 0: // 'q' - Sixel graphics
             handleSixel(params: params, data: data)
+
+        case 0x71 where intermediates.first == 0x24: // DCS $ q - DECRQSS
+            handleDECRQSS(data)
+
+        case 0x71 where intermediates.first == 0x2B: // DCS + q - XTGETTCAP
+            handleXTGETTCAP(data)
 
         case 0x7C: // '|' - XTVERSION response or DECUDK
             if intermediates.count > 0 && intermediates[0] == 0x3E {
                 // XTVERSION: DCS > | text ST
                 // This is a response, not a command we generate
             }
-
-        case 0x24 where intermediates.first == 0x24: // '$' - DECRQSS
-            handleDECRQSS(data)
-
-        case 0x2B where intermediates.first == 0x71: // '+q' - XTGETTCAP
-            handleXTGETTCAP(data)
 
         default:
             break

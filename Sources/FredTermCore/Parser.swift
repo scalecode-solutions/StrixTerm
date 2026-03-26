@@ -272,6 +272,8 @@ public struct VTParser: Sendable {
                 if byte >= 0x20 && byte <= 0x2F {
                     intermediates.append(byte)
                 } else if byte >= 0x30 && byte <= 0x7E {
+                    collectingFinalByte = byte
+                    dcsData.removeAll(keepingCapacity: true)
                     handleDCSStart(handler: &handler)
                     transition(to: .dcsPassthrough)
                 } else {

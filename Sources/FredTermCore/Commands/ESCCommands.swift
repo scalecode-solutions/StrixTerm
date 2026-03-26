@@ -22,8 +22,8 @@ extension TerminalState {
             buffer.saveCursor(attribute: cursorAttribute, modes: modes)
         case (0x38, 0): // DECRC - Restore Cursor
             let saved = buffer.restoreCursor()
-            buffer.cursorX = saved.x
-            buffer.cursorY = saved.y
+            buffer.cursorX = max(0, min(saved.x, cols - 1))
+            buffer.cursorY = max(0, min(saved.y, rows - 1))
             cursorAttribute = saved.attribute
             modes.originMode = saved.originMode
             modes.wraparound = saved.wraparound
@@ -92,7 +92,8 @@ extension TerminalState {
         cursorAttribute = 0
         cursorStyle = .blinkBlock
         charsets = CharsetState()
-        keyboard.reset()
+        keyboardNormal.reset()
+        keyboardAlt.reset()
         promptState = SemanticPromptState()
 
         // Reset normal buffer

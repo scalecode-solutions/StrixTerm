@@ -80,7 +80,8 @@ extension TerminalState {
         case (0x75, 0x3E): csiPushKeyboardMode(params)    // CSI > flags u
         case (0x75, 0x3C): csiPopKeyboardMode(params)     // CSI < count u
         case (0x75, 0x3F): csiQueryKeyboardMode()         // CSI ? u
-        case (0x75, 0): csiKittyKeyResponse(params)       // CSI key u (handled as input)
+        case (0x75, 0x3D): csiSetKeyboardMode(params)     // CSI = flags ; mode u
+        case (0x75, 0): csiRestoreCursor()                  // SCORC (CSI u = restore cursor)
 
         // Modify Other Keys (XTMODKEYS)
         case (0x6D, 0x3E): csiSetModifyOtherKeys(params)  // CSI > Pm m
@@ -136,8 +137,10 @@ extension TerminalState {
         let col = max(1, Int(params.value(1, default: 1))) - 1
 
         let top = modes.originMode ? buffer.scrollTop : 0
+        let left = (modes.originMode && modes.marginMode) ? buffer.marginLeft : 0
+        let right = (modes.originMode && modes.marginMode) ? buffer.marginRight : cols - 1
         buffer.cursorY = min(top + row, buffer.scrollBottom)
-        buffer.cursorX = min(col, cols - 1)
+        buffer.cursorX = min(left + col, right)
     }
 
     private mutating func csiLinePositionAbsolute(_ params: ParamBuffer) {
@@ -513,7 +516,8 @@ extension TerminalState {
     // MARK: - Kitty Keyboard Protocol
 
     private mutating func csiPushKeyboardMode(_ params: ParamBuffer) {
-        let flags = KittyKeyboardFlags(rawValue: UInt32(params.value(0, default: 0)))
+        let rawFlags = UInt32(params.value(0, default: 0))
+        let flags = KittyKeyboardFlags(rawValue: rawFlags).intersection(.knownMask)
         keyboard.push(flags)
     }
 
@@ -526,8 +530,26 @@ extension TerminalState {
         sendResponse("\u{1b}[?\(keyboard.currentFlags.rawValue)u")
     }
 
+    private mutating func csiSetKeyboardMode(_ params: ParamBuffer) {
+        let rawFlags = UInt32(params.value(0, default: 0))
+        let mode = Int(params.value(1, default: 1))
+        let newFlags = KittyKeyboardFlags(rawValue: rawFlags).intersection(.knownMask)
+
+        // Only modes 1 (set), 2 (union), 3 (subtract) are valid
+        guard mode >= 1 && mode <= 3 else { return }
+        keyboard.setFlags(newFlags, mode: mode)
+    }
+
     private mutating func csiKittyKeyResponse(_ params: ParamBuffer) {
         // Key event in Kitty protocol format - handled at the input layer
+    }
+
+    /// SCORC - Save Cursor (CSI s when not in margin mode) / Restore Cursor (CSI u)
+    private mutating func csiRestoreCursor() {
+        let saved = buffer.restoreCursor()
+        buffer.cursorX = saved.x
+        buffer.cursorY = saved.y
+        cursorAttribute = saved.attribute
     }
 
     // MARK: - XTMODKEYS

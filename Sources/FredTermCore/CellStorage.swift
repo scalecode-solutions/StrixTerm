@@ -320,6 +320,11 @@ public struct CellGrid: @unchecked Sendable {
 
     /// Get the text content of a line as a String.
     public func lineText(_ line: Int, trimTrailing: Bool = true) -> String {
+        lineText(line, trimTrailing: trimTrailing, graphemes: nil)
+    }
+
+    /// Get the text content of a line, resolving grapheme refs if a table is provided.
+    public func lineText(_ line: Int, trimTrailing: Bool = true, graphemes: GraphemeTable?) -> String {
         var result = ""
         var lastNonBlank = -1
 
@@ -333,7 +338,11 @@ public struct CellGrid: @unchecked Sendable {
         for col in 0..<endCol {
             let cell = self[line, col]
             if cell.flags.contains(.wideContinuation) { continue }
-            result.append(Character(cell.character))
+            if let g = graphemes, GraphemeTable.isGraphemeRef(cell.codePoint) {
+                result += g.lookup(cell.codePoint)
+            } else {
+                result.append(Character(cell.character))
+            }
         }
         return result
     }

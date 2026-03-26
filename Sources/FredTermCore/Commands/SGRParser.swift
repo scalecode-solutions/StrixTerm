@@ -26,17 +26,23 @@ extension TerminalState {
             // Underline styles
             case 4:
                 // Check for colon sub-parameter: CSI 4:Ps m
+                // Only treat next param as sub-param if it's a valid underline style (0-5)
                 if params.hasSubParams && i + 1 < params.count {
                     let sub = Int(params.value(i + 1, default: 1))
-                    i += 1
-                    switch sub {
-                    case 0: current.underlineStyle = .none; current.style.remove(.underline)
-                    case 1: current.underlineStyle = .single; current.style.insert(.underline)
-                    case 2: current.underlineStyle = .double; current.style.insert(.underline)
-                    case 3: current.underlineStyle = .curly; current.style.insert(.underline)
-                    case 4: current.underlineStyle = .dotted; current.style.insert(.underline)
-                    case 5: current.underlineStyle = .dashed; current.style.insert(.underline)
-                    default: current.underlineStyle = .single; current.style.insert(.underline)
+                    if sub >= 0 && sub <= 5 {
+                        i += 1
+                        switch sub {
+                        case 0: current.underlineStyle = .none; current.style.remove(.underline)
+                        case 1: current.underlineStyle = .single; current.style.insert(.underline)
+                        case 2: current.underlineStyle = .double; current.style.insert(.underline)
+                        case 3: current.underlineStyle = .curly; current.style.insert(.underline)
+                        case 4: current.underlineStyle = .dotted; current.style.insert(.underline)
+                        case 5: current.underlineStyle = .dashed; current.style.insert(.underline)
+                        default: current.underlineStyle = .single; current.style.insert(.underline)
+                        }
+                    } else {
+                        current.underlineStyle = .single
+                        current.style.insert(.underline)
                     }
                 } else {
                     current.underlineStyle = .single
@@ -122,22 +128,60 @@ extension TerminalState {
 
     /// Parse an extended color specification (256-color or truecolor).
     /// Returns the color and the number of additional params consumed.
+    ///
+    /// Supports both semicolon and colon syntax:
+    /// - Semicolon: `38;5;N` or `38;2;R;G;B`
+    /// - Colon:     `38:5:N` or `38:2:R:G:B` or `38:2:CS:R:G:B`
+    ///
+    /// When colons are used (`hasSubParams`), the truecolor form may include
+    /// an optional colorspace ID between the type and the R component.
+    /// An empty/missing colorspace (e.g. `38:2::R:G:B`) produces a `-1`
+    /// param which is treated as 0 and skipped.
     private func parseExtendedColor(
         _ params: ParamBuffer, startIndex: Int
     ) -> (TerminalColor, Int)? {
         guard startIndex < params.count else { return nil }
         let type = Int(params.value(startIndex, default: 0))
         switch type {
-        case 5: // 256-color: 38;5;Ps
+        case 5: // 256-color: 38;5;N or 38:5:N
             guard startIndex + 1 < params.count else { return nil }
             let idx = UInt8(clamping: Int(params.value(startIndex + 1, default: 0)))
             return (.indexed(idx), 2)
-        case 2: // Truecolor: 38;2;R;G;B
-            guard startIndex + 3 < params.count else { return nil }
-            let r = UInt8(clamping: Int(params.value(startIndex + 1, default: 0)))
-            let g = UInt8(clamping: Int(params.value(startIndex + 2, default: 0)))
-            let b = UInt8(clamping: Int(params.value(startIndex + 3, default: 0)))
-            return (.rgb(r, g, b), 4)
+        case 2: // Truecolor
+            if params.hasSubParams {
+                // Colon syntax: may have optional colorspace ID
+                // 38:2:R:G:B (no colorspace) or 38:2:CS:R:G:B (with colorspace)
+                // When colorspace is empty (38:2::R:G:B), the parser stores -1 for CS.
+                //
+                // Try 38:2:CS:R:G:B first (6 params from start of 38)
+                if startIndex + 4 < params.count {
+                    // Check if there are enough params for CS:R:G:B
+                    // If startIndex+1 is -1 or a small value, it could be colorspace
+                    let maybeCS = params[startIndex + 1]
+                    if startIndex + 4 < params.count && (maybeCS < 0 || maybeCS <= 255) {
+                        // Check if we have 4 more params (CS, R, G, B)
+                        if startIndex + 4 < params.count {
+                            let r = UInt8(clamping: Int(params.value(startIndex + 2, default: 0)))
+                            let g = UInt8(clamping: Int(params.value(startIndex + 3, default: 0)))
+                            let b = UInt8(clamping: Int(params.value(startIndex + 4, default: 0)))
+                            return (.rgb(r, g, b), 5)
+                        }
+                    }
+                }
+                // Fallback: 38:2:R:G:B (3 color components)
+                guard startIndex + 3 < params.count else { return nil }
+                let r = UInt8(clamping: Int(params.value(startIndex + 1, default: 0)))
+                let g = UInt8(clamping: Int(params.value(startIndex + 2, default: 0)))
+                let b = UInt8(clamping: Int(params.value(startIndex + 3, default: 0)))
+                return (.rgb(r, g, b), 4)
+            } else {
+                // Semicolon syntax: 38;2;R;G;B
+                guard startIndex + 3 < params.count else { return nil }
+                let r = UInt8(clamping: Int(params.value(startIndex + 1, default: 0)))
+                let g = UInt8(clamping: Int(params.value(startIndex + 2, default: 0)))
+                let b = UInt8(clamping: Int(params.value(startIndex + 3, default: 0)))
+                return (.rgb(r, g, b), 4)
+            }
         default:
             return nil
         }
