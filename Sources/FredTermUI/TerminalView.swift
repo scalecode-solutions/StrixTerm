@@ -50,6 +50,8 @@ public struct TerminalView: NSViewRepresentable {
     public var onSizeChanged: ((TerminalSize) -> Void)?
     /// Optional callback invoked when the terminal title changes.
     public var onTitleChanged: ((String) -> Void)?
+    /// Optional callback invoked when the user opens a hyperlink (Command-click or tap).
+    public var onOpenURL: ((String) -> Void)?
     /// Binding to toggle the find bar visibility from the backing view.
     @Binding var showFindBar: Bool
 
@@ -59,7 +61,8 @@ public struct TerminalView: NSViewRepresentable {
         showFindBar: Binding<Bool> = .constant(false),
         onSendData: (([UInt8]) -> Void)? = nil,
         onSizeChanged: ((TerminalSize) -> Void)? = nil,
-        onTitleChanged: ((String) -> Void)? = nil
+        onTitleChanged: ((String) -> Void)? = nil,
+        onOpenURL: ((String) -> Void)? = nil
     ) {
         self.terminal = terminal
         self.configuration = configuration
@@ -67,6 +70,7 @@ public struct TerminalView: NSViewRepresentable {
         self.onSendData = onSendData
         self.onSizeChanged = onSizeChanged
         self.onTitleChanged = onTitleChanged
+        self.onOpenURL = onOpenURL
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -120,6 +124,17 @@ public struct TerminalView: NSViewRepresentable {
         public func terminalViewTitleChanged(_ view: MacTerminalBackingView, title: String) {
             parent.onTitleChanged?(title)
         }
+
+        public func terminalView(_ view: MacTerminalBackingView, openURL url: String) {
+            if let callback = parent.onOpenURL {
+                callback(url)
+            } else {
+                // Default: open URL with the system handler
+                if let nsURL = URL(string: url) {
+                    NSWorkspace.shared.open(nsURL)
+                }
+            }
+        }
     }
 }
 
@@ -139,6 +154,7 @@ public struct TerminalSearchableView: View {
     public var onSendData: (([UInt8]) -> Void)?
     public var onSizeChanged: ((TerminalSize) -> Void)?
     public var onTitleChanged: ((String) -> Void)?
+    public var onOpenURL: ((String) -> Void)?
     public var onHighlight: ((SearchResult?) -> Void)?
 
     @State private var showFindBar: Bool = false
@@ -149,6 +165,7 @@ public struct TerminalSearchableView: View {
         onSendData: (([UInt8]) -> Void)? = nil,
         onSizeChanged: ((TerminalSize) -> Void)? = nil,
         onTitleChanged: ((String) -> Void)? = nil,
+        onOpenURL: ((String) -> Void)? = nil,
         onHighlight: ((SearchResult?) -> Void)? = nil
     ) {
         self.terminal = terminal
@@ -156,6 +173,7 @@ public struct TerminalSearchableView: View {
         self.onSendData = onSendData
         self.onSizeChanged = onSizeChanged
         self.onTitleChanged = onTitleChanged
+        self.onOpenURL = onOpenURL
         self.onHighlight = onHighlight
     }
 
@@ -167,7 +185,8 @@ public struct TerminalSearchableView: View {
                 showFindBar: $showFindBar,
                 onSendData: onSendData,
                 onSizeChanged: onSizeChanged,
-                onTitleChanged: onTitleChanged
+                onTitleChanged: onTitleChanged,
+                onOpenURL: onOpenURL
             )
 
             if showFindBar {
@@ -197,19 +216,23 @@ public struct TerminalView: UIViewRepresentable {
     public var onSizeChanged: ((TerminalSize) -> Void)?
     /// Optional callback invoked when the terminal title changes.
     public var onTitleChanged: ((String) -> Void)?
+    /// Optional callback invoked when the user taps a hyperlink.
+    public var onOpenURL: ((String) -> Void)?
 
     public init(
         terminal: Terminal,
         configuration: TerminalViewConfiguration = .default,
         onSendData: (([UInt8]) -> Void)? = nil,
         onSizeChanged: ((TerminalSize) -> Void)? = nil,
-        onTitleChanged: ((String) -> Void)? = nil
+        onTitleChanged: ((String) -> Void)? = nil,
+        onOpenURL: ((String) -> Void)? = nil
     ) {
         self.terminal = terminal
         self.configuration = configuration
         self.onSendData = onSendData
         self.onSizeChanged = onSizeChanged
         self.onTitleChanged = onTitleChanged
+        self.onOpenURL = onOpenURL
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -252,6 +275,17 @@ public struct TerminalView: UIViewRepresentable {
 
         public func terminalViewTitleChanged(_ view: IOSTerminalBackingView, title: String) {
             parent.onTitleChanged?(title)
+        }
+
+        public func terminalView(_ view: IOSTerminalBackingView, openURL url: String) {
+            if let callback = parent.onOpenURL {
+                callback(url)
+            } else {
+                // Default: open URL with the system handler
+                if let nsURL = URL(string: url) {
+                    UIApplication.shared.open(nsURL)
+                }
+            }
         }
     }
 }

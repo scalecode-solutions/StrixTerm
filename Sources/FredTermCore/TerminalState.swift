@@ -11,6 +11,7 @@ public struct TerminalState: @unchecked Sendable {
 
     public var parser: VTParser = VTParser()
     public var graphemes: GraphemeTable = GraphemeTable()
+    public var links: LinkTable = LinkTable()
     public var attributes: AttributeTable = AttributeTable()
     public var charsets: CharsetState = CharsetState()
 
@@ -33,6 +34,10 @@ public struct TerminalState: @unchecked Sendable {
     }
     public var palette: ColorPalette = .xterm
     public var promptState: SemanticPromptState = SemanticPromptState()
+
+    /// Active OSC 8 link tracking: when non-nil, all characters written
+    /// will be tagged with this link ID until the link is closed.
+    public var activeLinkTracking: (start: Position, linkId: UInt16)? = nil
 
     public var cols: Int
     public var rows: Int
@@ -208,12 +213,22 @@ extension TerminalState: TerminalEmulator {
             charsets.singleShift = -1
         }
 
+        let linkPayload: UInt16
+        let linkFlags: CellFlags
+        if let tracking = activeLinkTracking {
+            linkPayload = tracking.linkId
+            linkFlags = .hasLink
+        } else {
+            linkPayload = 0
+            linkFlags = []
+        }
+
         let cell = Cell(
             codePoint: cp,
             attribute: cursorAttribute,
             width: 1,
-            flags: [],
-            payload: 0
+            flags: linkFlags,
+            payload: linkPayload
         )
         buffer.insertCharacter(cell, modes: modes)
     }
@@ -281,12 +296,23 @@ extension TerminalState: TerminalEmulator {
         }
 
         let width = UnicodeWidth.width(of: scalar)
+
+        let linkPayload: UInt16
+        let linkFlags: CellFlags
+        if let tracking = activeLinkTracking {
+            linkPayload = tracking.linkId
+            linkFlags = .hasLink
+        } else {
+            linkPayload = 0
+            linkFlags = []
+        }
+
         let cell = Cell(
             codePoint: scalar,
             attribute: cursorAttribute,
             width: UInt8(width),
-            flags: [],
-            payload: 0
+            flags: linkFlags,
+            payload: linkPayload
         )
         buffer.insertCharacter(cell, modes: modes)
     }

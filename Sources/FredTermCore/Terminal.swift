@@ -188,6 +188,83 @@ public final class Terminal: @unchecked Sendable {
         return state.modes.applicationKeypad
     }
 
+    // MARK: - Hyperlink access
+
+    /// Get the explicit hyperlink at a position (from OSC 8).
+    public func explicitLink(at position: Position) -> LinkTable.LinkEntry? {
+        lock.lock()
+        defer { lock.unlock() }
+        let lineIdx = state.buffer.yBase + position.row
+        let cell = state.buffer.grid[lineIdx, position.col]
+        guard cell.flags.contains(.hasLink) else { return nil }
+        return state.links.lookup(cell.payload)
+    }
+
+    /// Get any link (explicit or implicit) at a position.
+    /// Returns the URL and any associated parameters.
+    public func link(at position: Position) -> (url: String, params: [String: String])? {
+        lock.lock()
+        defer { lock.unlock() }
+        let lineIdx = state.buffer.yBase + position.row
+        let cell = state.buffer.grid[lineIdx, position.col]
+        // Check explicit link first
+        if cell.flags.contains(.hasLink), let entry = state.links.lookup(cell.payload) {
+            return (url: entry.url, params: entry.params)
+        }
+        // Fall back to implicit URL detection
+        let text = state.buffer.grid.lineText(lineIdx, graphemes: state.graphemes)
+        if let match = LinkDetector.linkAt(col: position.col, in: text, row: position.row) {
+            return (url: match.url, params: [:])
+        }
+        return nil
+    }
+
+    /// Get the range of cells covered by a link at a position.
+    public func linkRange(at position: Position) -> (start: Position, end: Position)? {
+        lock.lock()
+        defer { lock.unlock() }
+        let lineIdx = state.buffer.yBase + position.row
+        let cell = state.buffer.grid[lineIdx, position.col]
+
+        if cell.flags.contains(.hasLink) {
+            let linkId = cell.payload
+            // Scan left and right to find the extent of cells with the same link ID
+            var startCol = position.col
+            while startCol > 0 {
+                let prev = state.buffer.grid[lineIdx, startCol - 1]
+                if prev.flags.contains(.hasLink) && prev.payload == linkId {
+                    startCol -= 1
+                } else {
+                    break
+                }
+            }
+            var endCol = position.col
+            let cols = state.cols
+            while endCol < cols - 1 {
+                let next = state.buffer.grid[lineIdx, endCol + 1]
+                if next.flags.contains(.hasLink) && next.payload == linkId {
+                    endCol += 1
+                } else {
+                    break
+                }
+            }
+            return (
+                start: Position(col: startCol, row: position.row),
+                end: Position(col: endCol, row: position.row)
+            )
+        }
+
+        // Fall back to implicit detection
+        let text = state.buffer.grid.lineText(lineIdx, graphemes: state.graphemes)
+        if let match = LinkDetector.linkAt(col: position.col, in: text, row: position.row) {
+            return (
+                start: Position(col: match.startCol, row: position.row),
+                end: Position(col: match.endCol - 1, row: position.row)
+            )
+        }
+        return nil
+    }
+
     // MARK: - Buffer access
 
     /// Get the text content of a visible line.

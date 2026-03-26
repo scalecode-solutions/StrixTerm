@@ -118,7 +118,6 @@ extension TerminalState {
         // Format: params;url
         // params can be id=xxx or empty
         // Empty URL closes the link
-        // For now, we just track and emit actions
         let text = String(bytes: payload, encoding: .utf8) ?? ""
         let parts = text.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
         guard parts.count == 2 else { return }
@@ -135,9 +134,13 @@ extension TerminalState {
         }
 
         if url.isEmpty {
-            // Close link
-            // TODO: clear link state on current cursor attribute
+            // Close link: stop tracking
+            activeLinkTracking = nil
         } else {
+            // Open link: insert into the link table and start tracking
+            let linkId = links.insert(url: url, params: linkParams)
+            let startPos = Position(col: buffer.cursorX, row: buffer.cursorY)
+            activeLinkTracking = (start: startPos, linkId: linkId)
             pendingActions.append(.openLink(url: url, params: linkParams))
         }
     }

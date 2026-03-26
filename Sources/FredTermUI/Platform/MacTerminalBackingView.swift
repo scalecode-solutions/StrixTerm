@@ -15,6 +15,13 @@ public protocol MacTerminalViewDelegate: AnyObject {
     func terminalView(_ view: MacTerminalBackingView, sizeChanged newSize: TerminalSize)
     /// Called when the terminal title changes.
     func terminalViewTitleChanged(_ view: MacTerminalBackingView, title: String)
+    /// Called when the user Command-clicks a hyperlink.
+    func terminalView(_ view: MacTerminalBackingView, openURL url: String)
+}
+
+/// Default implementations for optional delegate methods.
+public extension MacTerminalViewDelegate {
+    func terminalView(_ view: MacTerminalBackingView, openURL url: String) {}
 }
 
 // MARK: - MacTerminalBackingView
@@ -62,6 +69,13 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
     private var mouseDownPosition: Position?
     private var selectionStart: Position?
     private var selectionEnd: Position?
+
+    // Link hover state
+    private var isHoveringLink: Bool = false
+    private var hoveredLinkURL: String?
+
+    /// The Metal renderer, if available. Set by the view layer for link highlighting.
+    public var renderer: MetalRenderer?
 
     // MARK: - Initialization
 
@@ -329,6 +343,14 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
             }
             return
         }
+
+        // Check for Command-click on a link
+        if event.modifierFlags.contains(.command),
+           let linkInfo = terminal.link(at: pos) {
+            delegate?.terminalView(self, openURL: linkInfo.url)
+            return
+        }
+
         selectionEnd = pos
         mouseDownPosition = nil
         // Selection is now finalized between selectionStart and selectionEnd
@@ -345,6 +367,44 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
                 modifiers: mods
             ) {
                 sendToTerminal(data)
+            }
+            return
+        }
+
+        // Link hover detection
+        let pos = terminalPosition(from: event)
+        let shouldHighlight: Bool
+        switch configuration.linkHighlightMode {
+        case .always:
+            shouldHighlight = true
+        case .hover:
+            shouldHighlight = true
+        case .hoverWithModifier:
+            shouldHighlight = event.modifierFlags.contains(.command)
+        case .never:
+            shouldHighlight = false
+        }
+
+        if shouldHighlight, let linkInfo = terminal.link(at: pos) {
+            if let linkRange = terminal.linkRange(at: pos) {
+                renderer?.setHoveredLink(range: linkRange)
+            }
+            hoveredLinkURL = linkInfo.url
+            if !isHoveringLink {
+                isHoveringLink = true
+                NSCursor.pointingHand.set()
+            }
+            // Show tooltip with the URL
+            toolTip = linkInfo.url
+            metalView?.needsDisplay = true
+        } else {
+            if isHoveringLink {
+                isHoveringLink = false
+                hoveredLinkURL = nil
+                renderer?.setHoveredLink(range: nil)
+                NSCursor.iBeam.set()
+                toolTip = nil
+                metalView?.needsDisplay = true
             }
         }
     }
@@ -489,6 +549,19 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
                 terminal.scroll(delta: -lines)
             }
         }
+    }
+
+    /// Update cursor rects: show pointing hand over hovered links, iBeam elsewhere.
+    public override func resetCursorRects() {
+        if isHoveringLink, let linkRange = renderer?.hoveredLinkRange {
+            // Compute the rect for the link range
+            let linkX = CGFloat(linkRange.start.col) * cellWidth
+            let linkWidth = CGFloat(linkRange.end.col - linkRange.start.col + 1) * cellWidth
+            let flippedY = bounds.height - CGFloat(linkRange.start.row + 1) * cellHeight
+            let linkRect = NSRect(x: linkX, y: flippedY, width: linkWidth, height: cellHeight)
+            addCursorRect(linkRect, cursor: .pointingHand)
+        }
+        addCursorRect(bounds, cursor: .iBeam)
     }
 
     /// Request mouse-moved events so anyEvent mode can track cursor motion.

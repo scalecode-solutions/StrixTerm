@@ -15,6 +15,13 @@ public protocol IOSTerminalViewDelegate: AnyObject {
     func terminalView(_ view: IOSTerminalBackingView, sizeChanged newSize: TerminalSize)
     /// Called when the terminal title changes.
     func terminalViewTitleChanged(_ view: IOSTerminalBackingView, title: String)
+    /// Called when the user taps a hyperlink.
+    func terminalView(_ view: IOSTerminalBackingView, openURL url: String)
+}
+
+/// Default implementations for optional delegate methods.
+public extension IOSTerminalViewDelegate {
+    func terminalView(_ view: IOSTerminalBackingView, openURL url: String) {}
 }
 
 // MARK: - IOSTerminalBackingView
@@ -354,6 +361,14 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
                 ) {
                     sendToTerminal(releaseData)
                 }
+            } else {
+                // Check if the tap is on a hyperlink
+                let point = gesture.location(in: self)
+                let pos = terminalPosition(from: point)
+                if let linkInfo = terminal.link(at: pos) {
+                    delegate?.terminalView(self, openURL: linkInfo.url)
+                    return
+                }
             }
             becomeFirstResponder()
         }
@@ -427,20 +442,65 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
 
         switch gesture.state {
         case .began:
+            // Check for link under the long press
+            if let linkInfo = terminal.link(at: pos) {
+                showLinkContextMenu(url: linkInfo.url, at: point)
+                return
+            }
             isLongPressActive = true
             selectionStart = pos
             selectionEnd = pos
             setNeedsDisplay()
         case .changed:
-            selectionEnd = pos
-            setNeedsDisplay()
+            if isLongPressActive {
+                selectionEnd = pos
+                setNeedsDisplay()
+            }
         case .ended, .cancelled:
-            selectionEnd = pos
-            isLongPressActive = false
-            setNeedsDisplay()
+            if isLongPressActive {
+                selectionEnd = pos
+                isLongPressActive = false
+                setNeedsDisplay()
+            }
         default:
             break
         }
+    }
+
+    /// Show a context menu for a link at the given point.
+    private func showLinkContextMenu(url: String, at point: CGPoint) {
+        let alert = UIAlertController(title: url, message: nil, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "Open Link", style: .default) { [weak self] _ in
+            guard let self = self else { return }
+            self.delegate?.terminalView(self, openURL: url)
+        })
+        alert.addAction(UIAlertAction(title: "Copy Link", style: .default) { _ in
+            UIPasteboard.general.string = url
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+        // For iPad: set popover anchor
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = self
+            popover.sourceRect = CGRect(x: point.x, y: point.y, width: 1, height: 1)
+        }
+
+        // Find the nearest view controller to present the alert
+        if let viewController = findViewController() {
+            viewController.present(alert, animated: true)
+        }
+    }
+
+    /// Walk the responder chain to find a UIViewController.
+    private func findViewController() -> UIViewController? {
+        var responder: UIResponder? = self
+        while let r = responder {
+            if let vc = r as? UIViewController {
+                return vc
+            }
+            responder = r.next
+        }
+        return nil
     }
 
     @objc private func handleTwoFingerPan(_ gesture: UIPanGestureRecognizer) {

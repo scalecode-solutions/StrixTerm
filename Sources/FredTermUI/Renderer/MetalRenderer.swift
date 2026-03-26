@@ -143,6 +143,19 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
     /// The current selection, if any. Set by the view layer to enable selection highlighting.
     public var selection: Selection = Selection()
 
+    // MARK: - Link Hover State
+
+    /// The range of cells currently hovered that contain a hyperlink.
+    /// When set, those cells are rendered with an underline and link-colored foreground.
+    public var hoveredLinkRange: (start: Position, end: Position)?
+
+    /// Set the hovered link range and mark affected rows dirty for re-rendering.
+    public func setHoveredLink(range: (start: Position, end: Position)?) {
+        hoveredLinkRange = range
+        // Invalidating row hashes forces a full redraw on next frame.
+        previousRowHashes.removeAll()
+    }
+
     // MARK: - Init
 
     /// Create a MetalRenderer.
@@ -283,6 +296,22 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
                 if attr.style.contains(.strikethrough) { styleFlags |= CellStyleFlags.strikethrough }
                 if attr.style.contains(.overline) { styleFlags |= CellStyleFlags.overline }
 
+                // Check if this cell is in the hovered link range.
+                let isHoveredLink: Bool
+                if let linkRange = hoveredLinkRange,
+                   row == linkRange.start.row,
+                   col >= linkRange.start.col,
+                   col <= linkRange.end.col {
+                    isHoveredLink = true
+                } else {
+                    isHoveredLink = false
+                }
+
+                // Apply link color tint for hovered links.
+                if isHoveredLink {
+                    fgColor = SIMD4<Float>(0.4, 0.6, 1.0, 1.0)  // Blue link color
+                }
+
                 // Handle inverse video.
                 if attr.style.contains(.inverse) {
                     let tmp = fgColor
@@ -375,6 +404,18 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
                         pixelSize: SIMD2<Float>(decoWidth, 1),
                         color: fgColor
                     ))
+                }
+
+                // Link hover underline decoration.
+                if isHoveredLink {
+                    let linkColor = SIMD4<Float>(0.4, 0.6, 1.0, 1.0)
+                    buildUnderlineQuads(
+                        style: .single,
+                        x: cellPx, y: cellPy,
+                        width: decoWidth, cellHeight: ch,
+                        color: linkColor,
+                        into: &decorationQuads
+                    )
                 }
 
                 // Skip invisible cells or blank spaces for glyph rendering.

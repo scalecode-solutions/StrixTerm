@@ -35,6 +35,11 @@ struct ContentView: View {
             },
             onTitleChanged: { title in
                 // Window title updates handled by SwiftUI
+            },
+            onOpenURL: { urlString in
+                if let url = URL(string: urlString) {
+                    NSWorkspace.shared.open(url)
+                }
             }
         )
         .background(Color.black)

@@ -22,6 +22,8 @@ public struct TerminalSnapshot: Sendable {
     public let scrollOffset: Int
     /// Total scrollback lines.
     public let totalScrollback: Int
+    /// The link table for resolving cell hyperlinks.
+    public let linkTable: LinkTable
 
     init(state: TerminalState) {
         cols = state.cols
@@ -32,6 +34,7 @@ public struct TerminalSnapshot: Sendable {
         isAlternateBuffer = state.activeBufferIsAlt
         attributes = state.attributes
         palette = state.palette
+        linkTable = state.links
 
         let yBase = state.buffer.yBase
         let yDisp = state.buffer.yDisp
