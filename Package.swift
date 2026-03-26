@@ -22,6 +22,7 @@ let package = Package(
         .library(name: "FredTermProcess", targets: ["FredTermProcess"]),
         .library(name: "FredTermUI", targets: ["FredTermUI"]),
         .library(name: "FredTerm", targets: ["FredTerm"]),
+        .executable(name: "FredTermApp", targets: ["FredTermApp"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.4.3"),
@@ -49,6 +50,10 @@ let package = Package(
         ),
         .target(
             name: "FredTerm",
+            dependencies: ["FredTermCore", "FredTermUI", "FredTermProcess", "FredTermConfig"]
+        ),
+        .executableTarget(
+            name: "FredTermApp",
             dependencies: ["FredTermCore", "FredTermUI", "FredTermProcess", "FredTermConfig"]
         ),
         .testTarget(

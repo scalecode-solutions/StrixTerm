@@ -38,25 +38,74 @@ public enum LinkHighlightMode: Sendable {
 
 #if os(macOS)
 /// The primary SwiftUI terminal view for macOS.
+///
+/// Wraps a `MacTerminalBackingView` (the AppKit NSView hosting the Metal
+/// renderer and keyboard input) for use in SwiftUI view hierarchies.
 public struct TerminalView: NSViewRepresentable {
     public let terminal: Terminal
     public var configuration: TerminalViewConfiguration
+    /// Optional callback invoked when the terminal needs to send data to the host.
+    public var onSendData: (([UInt8]) -> Void)?
+    /// Optional callback invoked when the terminal size changes.
+    public var onSizeChanged: ((TerminalSize) -> Void)?
+    /// Optional callback invoked when the terminal title changes.
+    public var onTitleChanged: ((String) -> Void)?
 
-    public init(terminal: Terminal, configuration: TerminalViewConfiguration = .default) {
+    public init(
+        terminal: Terminal,
+        configuration: TerminalViewConfiguration = .default,
+        onSendData: (([UInt8]) -> Void)? = nil,
+        onSizeChanged: ((TerminalSize) -> Void)? = nil,
+        onTitleChanged: ((String) -> Void)? = nil
+    ) {
         self.terminal = terminal
         self.configuration = configuration
+        self.onSendData = onSendData
+        self.onSizeChanged = onSizeChanged
+        self.onTitleChanged = onTitleChanged
     }
 
-    public func makeNSView(context: Context) -> NSView {
-        // Placeholder - full Metal-backed view implementation in Phase 6
-        let view = NSView()
-        view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.black.cgColor
+    public func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    public func makeNSView(context: Context) -> MacTerminalBackingView {
+        let view = MacTerminalBackingView(
+            terminal: terminal,
+            configuration: configuration
+        )
+        view.delegate = context.coordinator
+        context.coordinator.parent = self
         return view
     }
 
-    public func updateNSView(_ nsView: NSView, context: Context) {
-        // Update view when configuration changes
+    public func updateNSView(_ nsView: MacTerminalBackingView, context: Context) {
+        context.coordinator.parent = self
+        nsView.configuration = configuration
+    }
+
+    // MARK: - Coordinator
+
+    /// Coordinator that bridges MacTerminalViewDelegate callbacks to SwiftUI closures.
+    @MainActor
+    public class Coordinator: MacTerminalViewDelegate {
+        var parent: TerminalView
+
+        init(_ parent: TerminalView) {
+            self.parent = parent
+        }
+
+        public func terminalView(_ view: MacTerminalBackingView, sendData data: [UInt8]) {
+            parent.onSendData?(data)
+        }
+
+        public func terminalView(_ view: MacTerminalBackingView, sizeChanged newSize: TerminalSize) {
+            parent.onSizeChanged?(newSize)
+        }
+
+        public func terminalViewTitleChanged(_ view: MacTerminalBackingView, title: String) {
+            parent.onTitleChanged?(title)
+        }
     }
 }
 #elseif os(iOS) || os(visionOS)
