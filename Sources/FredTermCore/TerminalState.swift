@@ -58,7 +58,9 @@ public struct TerminalState: @unchecked Sendable {
 
     /// Feed raw bytes from the host process into the terminal.
     public mutating func feed(_ data: [UInt8]) {
-        parser.parse(data, handler: &self)
+        var p = parser
+        p.parse(data, handler: &self)
+        parser = p
     }
 
     /// Feed a string from the host process.
@@ -162,7 +164,7 @@ extension TerminalState: TerminalEmulator {
             flags: [],
             payload: 0
         )
-        buffer.insertCharacter(cell, modes: modes, actions: &pendingActions)
+        buffer.insertCharacter(cell, modes: modes)
     }
 
     /// Handle a Unicode scalar (multi-byte characters).
@@ -181,7 +183,7 @@ extension TerminalState: TerminalEmulator {
             flags: [],
             payload: 0
         )
-        buffer.insertCharacter(cell, modes: modes, actions: &pendingActions)
+        buffer.insertCharacter(cell, modes: modes)
     }
 
     /// Handle a combining character by appending to the previous cell.
@@ -234,7 +236,7 @@ extension TerminalState: TerminalEmulator {
             let nextTab = buffer.tabStops.nextStop(after: buffer.cursorX)
             buffer.cursorX = min(nextTab, cols - 1)
         case 0x0A, 0x0B, 0x0C: // LF, VT, FF
-            buffer.linefeed(modes: modes, actions: &pendingActions)
+            buffer.linefeed(modes: modes)
             if modes.autoNewline {
                 buffer.cursorX = 0
             }

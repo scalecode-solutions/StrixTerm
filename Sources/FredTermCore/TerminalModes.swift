@@ -1,5 +1,5 @@
 /// Mouse tracking mode.
-public enum MouseMode: UInt8, Sendable {
+public enum MouseMode: UInt16, Sendable {
     case off = 0
     case x10 = 9
     case vt200 = 1000
@@ -8,7 +8,7 @@ public enum MouseMode: UInt8, Sendable {
 }
 
 /// Mouse encoding format.
-public enum MouseEncoding: UInt8, Sendable {
+public enum MouseEncoding: UInt16, Sendable {
     case x10 = 0
     case utf8 = 1005
     case sgr = 1006

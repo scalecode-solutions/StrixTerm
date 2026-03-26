@@ -160,12 +160,12 @@ public struct VTParser: Sendable {
 
     /// Parse a buffer of raw bytes, dispatching actions into the terminal state.
     @inlinable
-    public mutating func parse(_ data: [UInt8], handler: inout TerminalEmulator) {
+    public mutating func parse<H: TerminalEmulator>(_ data: [UInt8], handler: inout H) {
         parse(data[...], handler: &handler)
     }
 
     /// Parse a slice of raw bytes.
-    public mutating func parse(_ data: ArraySlice<UInt8>, handler: inout TerminalEmulator) {
+    public mutating func parse<H: TerminalEmulator>(_ data: ArraySlice<UInt8>, handler: inout H) {
         var i = data.startIndex
         while i < data.endIndex {
             let byte = data[i]
@@ -305,7 +305,7 @@ public struct VTParser: Sendable {
         }
     }
 
-    private mutating func handleEscape(_ byte: UInt8, handler: inout TerminalEmulator) {
+    private mutating func handleEscape<H: TerminalEmulator>(_ byte: UInt8, handler: inout H) {
         switch byte {
         case 0x5B: // '['
             transition(to: .csiEntry)
@@ -327,7 +327,7 @@ public struct VTParser: Sendable {
         }
     }
 
-    private mutating func handleCSIEntry(_ byte: UInt8, handler: inout TerminalEmulator) {
+    private mutating func handleCSIEntry<H: TerminalEmulator>(_ byte: UInt8, handler: inout H) {
         switch byte {
         case 0x30...0x39: // '0'-'9'
             params.push(Int32(byte - 0x30))
@@ -354,7 +354,7 @@ public struct VTParser: Sendable {
         }
     }
 
-    private mutating func handleCSIParam(_ byte: UInt8, handler: inout TerminalEmulator) {
+    private mutating func handleCSIParam<H: TerminalEmulator>(_ byte: UInt8, handler: inout H) {
         switch byte {
         case 0x30...0x39: // '0'-'9'
             if params.count == 0 {
@@ -435,16 +435,16 @@ public struct VTParser: Sendable {
         }
     }
 
-    private mutating func handleOSCEnd(handler: inout TerminalEmulator) {
+    private mutating func handleOSCEnd<H: TerminalEmulator>(handler: inout H) {
         handler.handleOSC(oscData)
         oscData.removeAll(keepingCapacity: true)
     }
 
-    private mutating func handleDCSStart(handler: inout TerminalEmulator) {
+    private mutating func handleDCSStart<H: TerminalEmulator>(handler: inout H) {
         dcsData.removeAll(keepingCapacity: true)
     }
 
-    private mutating func handleDCSEnd(handler: inout TerminalEmulator) {
+    private mutating func handleDCSEnd<H: TerminalEmulator>(handler: inout H) {
         handler.handleDCS(params: params, intermediates: intermediates,
                           final: collectingFinalByte, data: dcsData)
         dcsData.removeAll(keepingCapacity: true)

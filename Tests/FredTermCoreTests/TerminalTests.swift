@@ -420,7 +420,7 @@ struct TerminalPublicTests {
 
     @Test("Terminal visible text")
     func visibleText() {
-        let terminal = Terminal(cols: 10, rows: 3)
+        let terminal = Terminal(cols: 20, rows: 5)
         terminal.feed(text: "Line1\nLine2\nLine3")
 
         let text = terminal.visibleText()

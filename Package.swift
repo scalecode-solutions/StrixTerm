@@ -60,5 +60,5 @@ let package = Package(
             dependencies: ["FredTermProcess"]
         ),
     ],
-    swiftLanguageVersions: [.v6]
+    swiftLanguageModes: [.v6]
 )

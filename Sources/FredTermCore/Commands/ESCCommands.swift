@@ -6,12 +6,12 @@ extension TerminalState {
         switch (final, inter) {
         // Index / Reverse Index
         case (0x44, 0): // IND - Index (move down, scroll if needed)
-            buffer.linefeed(modes: modes, actions: &pendingActions)
+            buffer.linefeed(modes: modes)
         case (0x45, 0): // NEL - Next Line
             buffer.cursorX = 0
-            buffer.linefeed(modes: modes, actions: &pendingActions)
+            buffer.linefeed(modes: modes)
         case (0x4D, 0): // RI - Reverse Index
-            buffer.reverseIndex(modes: modes, actions: &pendingActions)
+            buffer.reverseIndex(modes: modes)
 
         // Tab set
         case (0x48, 0): // HTS - Horizontal Tab Set

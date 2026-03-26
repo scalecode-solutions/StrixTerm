@@ -95,7 +95,7 @@ public final class ProcessHost: @unchecked Sendable {
 
         // Set non-blocking
         let flags = fcntl(masterFD, F_GETFL)
-        fcntl(masterFD, F_SETFL, flags | O_NONBLOCK)
+        _ = fcntl(masterFD, F_SETFL, flags | O_NONBLOCK)
 
         setupReadSource()
         setupProcessSource()
@@ -130,7 +130,7 @@ public final class ProcessHost: @unchecked Sendable {
 
         // Send SIGWINCH to the child process group
         if childPID > 0 {
-            kill(-childPID, SIGWINCH)
+            Darwin.kill(-childPID, SIGWINCH)
         }
     }
 
@@ -138,7 +138,7 @@ public final class ProcessHost: @unchecked Sendable {
     public func terminate() {
         guard isRunning else { return }
         if childPID > 0 {
-            kill(childPID, SIGTERM)
+            Darwin.kill(childPID, SIGTERM)
         }
     }
 
@@ -216,7 +216,7 @@ public final class ProcessHost: @unchecked Sendable {
     private func drainRemainingData() {
         // Set blocking mode briefly to drain
         let flags = fcntl(childFD, F_GETFL)
-        fcntl(childFD, F_SETFL, flags & ~O_NONBLOCK)
+        _ = fcntl(childFD, F_SETFL, flags & ~O_NONBLOCK)
 
         // Use a short timeout via select
         var readSet = fd_set()
@@ -242,7 +242,7 @@ public final class ProcessHost: @unchecked Sendable {
         }
 
         // Restore non-blocking
-        fcntl(childFD, F_SETFL, flags)
+        _ = fcntl(childFD, F_SETFL, flags)
     }
 }
 
@@ -256,17 +256,17 @@ public enum ProcessHostError: Error {
 
 @inline(__always)
 private func __darwin_fd_zero(_ set: UnsafeMutablePointer<fd_set>) {
-    set.pointee.__fds_bits = (0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0,
-                               0, 0, 0, 0, 0, 0, 0, 0)
+    set.pointee.fds_bits = (0, 0, 0, 0, 0, 0, 0, 0,
+                             0, 0, 0, 0, 0, 0, 0, 0,
+                             0, 0, 0, 0, 0, 0, 0, 0,
+                             0, 0, 0, 0, 0, 0, 0, 0)
 }
 
 @inline(__always)
 private func __darwin_fd_set(_ fd: Int32, _ set: UnsafeMutablePointer<fd_set>) {
     let intOffset = Int(fd) / 32
     let bitOffset = Int(fd) % 32
-    withUnsafeMutablePointer(to: &set.pointee.__fds_bits) { ptr in
+    withUnsafeMutablePointer(to: &set.pointee.fds_bits) { ptr in
         let rawPtr = UnsafeMutableRawPointer(ptr)
         let int32Ptr = rawPtr.assumingMemoryBound(to: Int32.self)
         int32Ptr[intOffset] |= Int32(1 << bitOffset)

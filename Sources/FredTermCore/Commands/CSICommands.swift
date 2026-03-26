@@ -222,7 +222,7 @@ extension TerminalState {
 
     private mutating func csiScrollUp(_ params: ParamBuffer) {
         let n = max(1, Int(params.value(0, default: 1)))
-        buffer.scroll(up: n, modes: modes, actions: &pendingActions)
+        buffer.scroll(up: n, modes: modes)
     }
 
     private mutating func csiScrollDown(_ params: ParamBuffer) {
@@ -441,7 +441,7 @@ extension TerminalState {
         let col = max(0, buffer.cursorX - 1)
         let cell = buffer.grid[lineIdx, col]
         for _ in 0..<n {
-            buffer.insertCharacter(cell, modes: modes, actions: &pendingActions)
+            buffer.insertCharacter(cell, modes: modes)
         }
     }
 

@@ -73,8 +73,7 @@ public struct BufferState: @unchecked Sendable {
     @inline(__always)
     public mutating func insertCharacter(
         _ cell: Cell,
-        modes: TerminalModes,
-        actions: inout [TerminalAction]
+        modes: TerminalModes
     ) {
         let width = Int(cell.width)
         let lineIdx = yBase + cursorY
@@ -90,7 +89,7 @@ public struct BufferState: @unchecked Sendable {
                     return m
                 }()
                 cursorX = modes.marginMode ? marginLeft : 0
-                linefeed(modes: modes, actions: &actions)
+                linefeed(modes: modes)
             } else {
                 cursorX = rightLimit - 1
             }
@@ -124,11 +123,10 @@ public struct BufferState: @unchecked Sendable {
 
     /// Perform a linefeed: move cursor down, scrolling if needed.
     public mutating func linefeed(
-        modes: TerminalModes,
-        actions: inout [TerminalAction]
+        modes: TerminalModes
     ) {
         if cursorY == scrollBottom {
-            scroll(up: 1, modes: modes, actions: &actions)
+            scroll(up: 1, modes: modes)
         } else if cursorY < rows - 1 {
             cursorY += 1
         }
@@ -137,8 +135,7 @@ public struct BufferState: @unchecked Sendable {
     /// Scroll the scroll region up by `n` lines.
     public mutating func scroll(
         up n: Int,
-        modes: TerminalModes,
-        actions: inout [TerminalAction]
+        modes: TerminalModes
     ) {
         if hasScrollback && scrollTop == 0 && !modes.marginMode {
             // Add lines to scrollback
@@ -168,8 +165,7 @@ public struct BufferState: @unchecked Sendable {
 
     /// Reverse index: scroll down if cursor is at scrollTop.
     public mutating func reverseIndex(
-        modes: TerminalModes,
-        actions: inout [TerminalAction]
+        modes: TerminalModes
     ) {
         if cursorY == scrollTop {
             scrollDown(1, modes: modes)
