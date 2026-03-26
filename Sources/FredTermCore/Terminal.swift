@@ -121,6 +121,38 @@ public final class Terminal: @unchecked Sendable {
         return state.modes.mouseEncoding
     }
 
+    /// Whether the terminal is currently tracking mouse events.
+    public var isTrackingMouse: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return state.modes.mouseMode != .off
+    }
+
+    /// Encode and return mouse event data for sending to the host process.
+    /// Returns nil if the current mouse mode doesn't report this event type.
+    public func encodeMouseEvent(
+        button: MouseButton,
+        action: MouseAction,
+        position: Position,
+        pixelPosition: (x: Int, y: Int)? = nil,
+        modifiers: MouseModifiers = []
+    ) -> [UInt8]? {
+        lock.lock()
+        let mode = state.modes.mouseMode
+        let encoding = state.modes.mouseEncoding
+        lock.unlock()
+
+        return MouseEncoder.encode(
+            button: button,
+            action: action,
+            position: position,
+            pixelPosition: pixelPosition,
+            modifiers: modifiers,
+            mode: mode,
+            encoding: encoding
+        )
+    }
+
     /// Whether bracketed paste mode is active.
     public var bracketedPasteMode: Bool {
         lock.lock()

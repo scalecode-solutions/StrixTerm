@@ -67,6 +67,10 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
     private var selectionEnd: Position?
     private var isLongPressActive: Bool = false
 
+    // Mouse tracking gesture
+    private var mouseTrackingPan: UIPanGestureRecognizer?
+    private var mouseTrackingSingleTap: UITapGestureRecognizer?
+
     // Scroll state
     private var isUserScrolling: Bool = false
     private var scrollAccumulator: CGFloat = 0.0
@@ -152,7 +156,7 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
     // MARK: - Gesture Setup
 
     private func setupGestures() {
-        // Single tap: become first responder (show keyboard)
+        // Single tap: become first responder (show keyboard), or mouse click when tracking.
         let singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap(_:)))
         singleTap.numberOfTapsRequired = 1
         addGestureRecognizer(singleTap)
@@ -172,6 +176,13 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
         // Long press: start selection at press location
         let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
         addGestureRecognizer(longPress)
+
+        // Single-finger pan for mouse drag tracking.
+        let mouseTrackPan = UIPanGestureRecognizer(target: self, action: #selector(handleMouseTrackingPan(_:)))
+        mouseTrackPan.minimumNumberOfTouches = 1
+        mouseTrackPan.maximumNumberOfTouches = 1
+        addGestureRecognizer(mouseTrackPan)
+        self.mouseTrackingPan = mouseTrackPan
 
         // Two-finger pan: scroll through scrollback buffer
         let twoFingerPan = UIPanGestureRecognizer(target: self, action: #selector(handleTwoFingerPan(_:)))
@@ -329,12 +340,57 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
 
     @objc private func handleSingleTap(_ gesture: UITapGestureRecognizer) {
         if gesture.state == .ended {
+            if terminal.isTrackingMouse {
+                let point = gesture.location(in: self)
+                let pos = terminalPosition(from: point)
+                // Send press + release for a tap.
+                if let pressData = terminal.encodeMouseEvent(
+                    button: .left, action: .press, position: pos
+                ) {
+                    sendToTerminal(pressData)
+                }
+                if let releaseData = terminal.encodeMouseEvent(
+                    button: .left, action: .release, position: pos
+                ) {
+                    sendToTerminal(releaseData)
+                }
+            }
             becomeFirstResponder()
+        }
+    }
+
+    @objc private func handleMouseTrackingPan(_ gesture: UIPanGestureRecognizer) {
+        guard terminal.isTrackingMouse else { return }
+        let point = gesture.location(in: self)
+        let pos = terminalPosition(from: point)
+        switch gesture.state {
+        case .began:
+            if let data = terminal.encodeMouseEvent(
+                button: .left, action: .press, position: pos
+            ) {
+                sendToTerminal(data)
+            }
+        case .changed:
+            if let data = terminal.encodeMouseEvent(
+                button: .left, action: .motion, position: pos
+            ) {
+                sendToTerminal(data)
+            }
+        case .ended, .cancelled:
+            if let data = terminal.encodeMouseEvent(
+                button: .left, action: .release, position: pos
+            ) {
+                sendToTerminal(data)
+            }
+        default:
+            break
         }
     }
 
     @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
         guard gesture.state == .ended else { return }
+        // When mouse tracking is active, ignore selection gestures.
+        guard !terminal.isTrackingMouse else { return }
         let point = gesture.location(in: self)
         let pos = terminalPosition(from: point)
 
@@ -352,6 +408,8 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
 
     @objc private func handleTripleTap(_ gesture: UITapGestureRecognizer) {
         guard gesture.state == .ended else { return }
+        // When mouse tracking is active, ignore selection gestures.
+        guard !terminal.isTrackingMouse else { return }
         let point = gesture.location(in: self)
         let pos = terminalPosition(from: point)
 
@@ -362,6 +420,8 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
     }
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        // When mouse tracking is active, ignore selection gestures.
+        guard !terminal.isTrackingMouse else { return }
         let point = gesture.location(in: self)
         let pos = terminalPosition(from: point)
 
@@ -384,6 +444,29 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
     }
 
     @objc private func handleTwoFingerPan(_ gesture: UIPanGestureRecognizer) {
+        if terminal.isTrackingMouse {
+            // When mouse tracking is active, two-finger scroll sends scroll button events.
+            guard gesture.state == .changed else { return }
+            let delta = gesture.translation(in: self).y
+            gesture.setTranslation(.zero, in: self)
+            scrollAccumulator += delta
+            let lines = Int(scrollAccumulator / cellHeight)
+            if lines != 0 {
+                let point = gesture.location(in: self)
+                let pos = terminalPosition(from: point)
+                let button: MouseButton = lines > 0 ? .scrollUp : .scrollDown
+                let count = abs(lines)
+                for _ in 0..<count {
+                    if let data = terminal.encodeMouseEvent(
+                        button: button, action: .press, position: pos
+                    ) {
+                        sendToTerminal(data)
+                    }
+                }
+                scrollAccumulator -= CGFloat(lines) * cellHeight
+            }
+            return
+        }
         switch gesture.state {
         case .began:
             isUserScrolling = true

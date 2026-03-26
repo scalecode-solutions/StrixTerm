@@ -276,8 +276,23 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
 
     // MARK: - Mouse Handling
 
+    /// Track the last button used for drag/release tracking.
+    private var lastMouseButton: MouseButton = .left
+
     public override func mouseDown(with event: NSEvent) {
         let pos = terminalPosition(from: event)
+        if terminal.isTrackingMouse {
+            lastMouseButton = .left
+            let mods = mouseModifiers(from: event)
+            if let data = terminal.encodeMouseEvent(
+                button: .left, action: .press, position: pos,
+                pixelPosition: pixelPosition(for: event),
+                modifiers: mods
+            ) {
+                sendToTerminal(data)
+            }
+            return
+        }
         mouseDownPosition = pos
         selectionStart = pos
         selectionEnd = pos
@@ -286,19 +301,180 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
 
     public override func mouseDragged(with event: NSEvent) {
         let pos = terminalPosition(from: event)
+        if terminal.isTrackingMouse {
+            let mods = mouseModifiers(from: event)
+            if let data = terminal.encodeMouseEvent(
+                button: lastMouseButton, action: .motion, position: pos,
+                pixelPosition: pixelPosition(for: event),
+                modifiers: mods
+            ) {
+                sendToTerminal(data)
+            }
+            return
+        }
         selectionEnd = pos
         needsDisplay = true
     }
 
     public override func mouseUp(with event: NSEvent) {
         let pos = terminalPosition(from: event)
+        if terminal.isTrackingMouse {
+            let mods = mouseModifiers(from: event)
+            if let data = terminal.encodeMouseEvent(
+                button: .left, action: .release, position: pos,
+                pixelPosition: pixelPosition(for: event),
+                modifiers: mods
+            ) {
+                sendToTerminal(data)
+            }
+            return
+        }
         selectionEnd = pos
         mouseDownPosition = nil
         // Selection is now finalized between selectionStart and selectionEnd
         needsDisplay = true
     }
 
+    public override func mouseMoved(with event: NSEvent) {
+        if terminal.isTrackingMouse {
+            let pos = terminalPosition(from: event)
+            let mods = mouseModifiers(from: event)
+            if let data = terminal.encodeMouseEvent(
+                button: .none, action: .motion, position: pos,
+                pixelPosition: pixelPosition(for: event),
+                modifiers: mods
+            ) {
+                sendToTerminal(data)
+            }
+        }
+    }
+
+    public override func rightMouseDown(with event: NSEvent) {
+        if terminal.isTrackingMouse {
+            let pos = terminalPosition(from: event)
+            lastMouseButton = .right
+            let mods = mouseModifiers(from: event)
+            if let data = terminal.encodeMouseEvent(
+                button: .right, action: .press, position: pos,
+                pixelPosition: pixelPosition(for: event),
+                modifiers: mods
+            ) {
+                sendToTerminal(data)
+            }
+            return
+        }
+        super.rightMouseDown(with: event)
+    }
+
+    public override func rightMouseUp(with event: NSEvent) {
+        if terminal.isTrackingMouse {
+            let pos = terminalPosition(from: event)
+            let mods = mouseModifiers(from: event)
+            if let data = terminal.encodeMouseEvent(
+                button: .right, action: .release, position: pos,
+                pixelPosition: pixelPosition(for: event),
+                modifiers: mods
+            ) {
+                sendToTerminal(data)
+            }
+            return
+        }
+        super.rightMouseUp(with: event)
+    }
+
+    public override func rightMouseDragged(with event: NSEvent) {
+        if terminal.isTrackingMouse {
+            let pos = terminalPosition(from: event)
+            let mods = mouseModifiers(from: event)
+            if let data = terminal.encodeMouseEvent(
+                button: .right, action: .motion, position: pos,
+                pixelPosition: pixelPosition(for: event),
+                modifiers: mods
+            ) {
+                sendToTerminal(data)
+            }
+            return
+        }
+        super.rightMouseDragged(with: event)
+    }
+
+    public override func otherMouseDown(with event: NSEvent) {
+        if terminal.isTrackingMouse {
+            let pos = terminalPosition(from: event)
+            lastMouseButton = .middle
+            let mods = mouseModifiers(from: event)
+            if let data = terminal.encodeMouseEvent(
+                button: .middle, action: .press, position: pos,
+                pixelPosition: pixelPosition(for: event),
+                modifiers: mods
+            ) {
+                sendToTerminal(data)
+            }
+            return
+        }
+        super.otherMouseDown(with: event)
+    }
+
+    public override func otherMouseUp(with event: NSEvent) {
+        if terminal.isTrackingMouse {
+            let pos = terminalPosition(from: event)
+            let mods = mouseModifiers(from: event)
+            if let data = terminal.encodeMouseEvent(
+                button: .middle, action: .release, position: pos,
+                pixelPosition: pixelPosition(for: event),
+                modifiers: mods
+            ) {
+                sendToTerminal(data)
+            }
+            return
+        }
+        super.otherMouseUp(with: event)
+    }
+
+    public override func otherMouseDragged(with event: NSEvent) {
+        if terminal.isTrackingMouse {
+            let pos = terminalPosition(from: event)
+            let mods = mouseModifiers(from: event)
+            if let data = terminal.encodeMouseEvent(
+                button: .middle, action: .motion, position: pos,
+                pixelPosition: pixelPosition(for: event),
+                modifiers: mods
+            ) {
+                sendToTerminal(data)
+            }
+            return
+        }
+        super.otherMouseDragged(with: event)
+    }
+
     public override func scrollWheel(with event: NSEvent) {
+        if terminal.isTrackingMouse {
+            let pos = terminalPosition(from: event)
+            let mods = mouseModifiers(from: event)
+            let deltaY = event.scrollingDeltaY
+            if deltaY != 0 {
+                let button: MouseButton = deltaY > 0 ? .scrollUp : .scrollDown
+                if let data = terminal.encodeMouseEvent(
+                    button: button, action: .press, position: pos,
+                    pixelPosition: pixelPosition(for: event),
+                    modifiers: mods
+                ) {
+                    sendToTerminal(data)
+                }
+            }
+            let deltaX = event.scrollingDeltaX
+            if deltaX != 0 {
+                let button: MouseButton = deltaX > 0 ? .scrollLeft : .scrollRight
+                if let data = terminal.encodeMouseEvent(
+                    button: button, action: .press, position: pos,
+                    pixelPosition: pixelPosition(for: event),
+                    modifiers: mods
+                ) {
+                    sendToTerminal(data)
+                }
+            }
+            return
+        }
         let delta = event.scrollingDeltaY
         if event.hasPreciseScrollingDeltas {
             // Trackpad - accumulate fractional lines
@@ -313,6 +489,17 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
                 terminal.scroll(delta: -lines)
             }
         }
+    }
+
+    /// Request mouse-moved events so anyEvent mode can track cursor motion.
+    public override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas {
+            removeTrackingArea(area)
+        }
+        let options: NSTrackingArea.Options = [.mouseMoved, .activeInKeyWindow, .inVisibleRect]
+        let trackingArea = NSTrackingArea(rect: .zero, options: options, owner: self, userInfo: nil)
+        addTrackingArea(trackingArea)
     }
 
     // MARK: - Find Panel
@@ -344,6 +531,28 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
         let flippedY = bounds.height - localPoint.y
         let row = max(0, min(terminalSize.rows - 1, Int(flippedY / cellHeight)))
         return Position(col: col, row: row)
+    }
+
+    /// Convert a mouse event to pixel coordinates (relative to the terminal view).
+    private func pixelPosition(for event: NSEvent) -> (x: Int, y: Int) {
+        let localPoint = convert(event.locationInWindow, from: nil)
+        let flippedY = bounds.height - localPoint.y
+        return (x: max(0, Int(localPoint.x)), y: max(0, Int(flippedY)))
+    }
+
+    /// Extract mouse modifier flags from an NSEvent.
+    private func mouseModifiers(from event: NSEvent) -> MouseModifiers {
+        var mods = MouseModifiers()
+        if event.modifierFlags.contains(.shift) {
+            mods.insert(.shift)
+        }
+        if event.modifierFlags.contains(.option) {
+            mods.insert(.alt)
+        }
+        if event.modifierFlags.contains(.control) {
+            mods.insert(.control)
+        }
+        return mods
     }
 
     /// Send encoded bytes to the terminal and notify the delegate.
