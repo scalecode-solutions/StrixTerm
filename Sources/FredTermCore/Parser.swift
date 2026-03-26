@@ -149,6 +149,7 @@ public struct VTParser: Sendable {
     public var intermediates: IntermediateBuffer = IntermediateBuffer()
     public var oscData: [UInt8] = []
     public var dcsData: [UInt8] = []
+    public var apcData: [UInt8] = []
 
     /// The current collecting character code for CSI/ESC.
     var collectingFinalByte: UInt8 = 0
@@ -193,6 +194,8 @@ public struct VTParser: Sendable {
                         handleOSCEnd(handler: &handler)
                     } else if currentState == .dcsPassthrough {
                         handleDCSEnd(handler: &handler)
+                    } else if currentState == .sosPmApcString {
+                        handleAPCEnd(handler: &handler)
                     }
                     transition(to: .escape)
                     continue
@@ -290,8 +293,10 @@ public struct VTParser: Sendable {
                 break
 
             case .sosPmApcString:
-                // Consume and ignore until ST
-                break
+                // Collect bytes for APC sequences (Kitty graphics etc.)
+                if byte >= 0x20 && byte <= 0x7F {
+                    apcData.append(byte)
+                }
             }
         }
     }
@@ -316,7 +321,10 @@ public struct VTParser: Sendable {
             currentState = .oscString
         case 0x50: // 'P'
             transition(to: .dcsEntry)
-        case 0x58, 0x5E, 0x5F: // 'X', '^', '_' (SOS, PM, APC)
+        case 0x58, 0x5E: // 'X', '^' (SOS, PM)
+            currentState = .sosPmApcString
+        case 0x5F: // '_' (APC)
+            apcData.removeAll(keepingCapacity: true)
             currentState = .sosPmApcString
         case 0x20...0x2F: // intermediates
             intermediates.append(byte)
@@ -450,6 +458,13 @@ public struct VTParser: Sendable {
         handler.handleDCS(params: params, intermediates: intermediates,
                           final: collectingFinalByte, data: dcsData)
         dcsData.removeAll(keepingCapacity: true)
+    }
+
+    private mutating func handleAPCEnd<H: TerminalEmulator>(handler: inout H) {
+        if !apcData.isEmpty {
+            handler.handleAPC(apcData)
+            apcData.removeAll(keepingCapacity: true)
+        }
     }
 }
 

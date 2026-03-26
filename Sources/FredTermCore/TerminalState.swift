@@ -34,6 +34,7 @@ public struct TerminalState: @unchecked Sendable {
     }
     public var palette: ColorPalette = .xterm
     public var promptState: SemanticPromptState = SemanticPromptState()
+    public var kittyGraphics: KittyGraphicsState = KittyGraphicsState()
 
     /// Active OSC 8 link tracking: when non-nil, all characters written
     /// will be tagged with this link ID until the link is closed.
@@ -447,5 +448,24 @@ extension TerminalState: TerminalEmulator {
         final: UInt8, data: [UInt8]
     ) {
         dispatchDCS(params: params, intermediates: intermediates, final: final, data: data)
+    }
+
+    /// Handle an APC sequence.
+    public mutating func handleAPC(_ data: [UInt8]) {
+        guard !data.isEmpty else { return }
+        // Kitty graphics: APC starts with 'G'
+        if data[0] == UInt8(ascii: "G") {
+            let content = data.dropFirst() // skip the 'G'
+            if let semicolonIdx = content.firstIndex(of: UInt8(ascii: ";")) {
+                let control = content[content.startIndex..<semicolonIdx]
+                let payload = content[content.index(after: semicolonIdx)..<content.endIndex]
+                handleKittyGraphics(control: control, payload: payload)
+            } else {
+                // No payload
+                let control = content[content.startIndex..<content.endIndex]
+                let emptyPayload = content[content.endIndex..<content.endIndex]
+                handleKittyGraphics(control: control, payload: emptyPayload)
+            }
+        }
     }
 }

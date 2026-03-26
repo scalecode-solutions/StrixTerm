@@ -10,6 +10,7 @@ struct MockEmulator: TerminalEmulator {
     var escDispatches: [(intermediates: IntermediateBuffer, final: UInt8)] = []
     var oscData: [[UInt8]] = []
     var dcsData: [(params: ParamBuffer, intermediates: IntermediateBuffer, final: UInt8, data: [UInt8])] = []
+    var apcData: [[UInt8]] = []
 
     mutating func handlePrint(_ byte: UInt8) {
         printedBytes.append(byte)
@@ -37,6 +38,10 @@ struct MockEmulator: TerminalEmulator {
 
     mutating func handleDCS(params: ParamBuffer, intermediates: IntermediateBuffer, final: UInt8, data: [UInt8]) {
         dcsData.append((params, intermediates, final, data))
+    }
+
+    mutating func handleAPC(_ data: [UInt8]) {
+        apcData.append(data)
     }
 }
 

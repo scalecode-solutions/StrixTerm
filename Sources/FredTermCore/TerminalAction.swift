@@ -53,6 +53,10 @@ public enum TerminalAction: Sendable {
     case needsDisplay
     /// Set the current working directory (OSC 7).
     case setCurrentDirectory(String)
+    /// A Kitty graphics image has been placed.
+    case imagePlaced(placement: KittyPlacement)
+    /// A Kitty graphics image has been deleted (nil = all).
+    case imageDeleted(imageId: UInt32?)
 }
 
 /// Progress reporting state (OSC 9;4).

@@ -27,4 +27,7 @@ public protocol TerminalEmulator {
     mutating func handleDCS(
         params: ParamBuffer, intermediates: IntermediateBuffer,
         final: UInt8, data: [UInt8])
+
+    /// Handle an APC (Application Program Command) sequence.
+    mutating func handleAPC(_ data: [UInt8])
 }

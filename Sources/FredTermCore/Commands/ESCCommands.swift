@@ -95,6 +95,7 @@ extension TerminalState {
         keyboardNormal.reset()
         keyboardAlt.reset()
         promptState = SemanticPromptState()
+        kittyGraphics.reset()
 
         // Reset normal buffer
         normalBuffer.scrollTop = 0
