@@ -10,59 +10,59 @@ let platformExcludes: [String] = []
 #endif
 
 let package = Package(
-    name: "FredTerm",
+    name: "StrixTerm",
     platforms: [
         .macOS(.v15),
         .iOS(.v18),
         .visionOS(.v2)
     ],
     products: [
-        .library(name: "FredTermCore", targets: ["FredTermCore"]),
-        .library(name: "FredTermConfig", targets: ["FredTermConfig"]),
-        .library(name: "FredTermProcess", targets: ["FredTermProcess"]),
-        .library(name: "FredTermUI", targets: ["FredTermUI"]),
-        .library(name: "FredTerm", targets: ["FredTerm"]),
-        .executable(name: "FredTermApp", targets: ["FredTermApp"]),
+        .library(name: "StrixTermCore", targets: ["StrixTermCore"]),
+        .library(name: "StrixTermConfig", targets: ["StrixTermConfig"]),
+        .library(name: "StrixTermProcess", targets: ["StrixTermProcess"]),
+        .library(name: "StrixTermUI", targets: ["StrixTermUI"]),
+        .library(name: "StrixTerm", targets: ["StrixTerm"]),
+        .executable(name: "StrixTermApp", targets: ["StrixTermApp"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.4.3"),
     ],
     targets: [
         .target(
-            name: "FredTermCore",
+            name: "StrixTermCore",
             dependencies: []
         ),
         .target(
-            name: "FredTermConfig",
-            dependencies: ["FredTermCore"]
+            name: "StrixTermConfig",
+            dependencies: ["StrixTermCore"]
         ),
         .target(
-            name: "FredTermProcess",
-            dependencies: ["FredTermCore"]
+            name: "StrixTermProcess",
+            dependencies: ["StrixTermCore"]
         ),
         .target(
-            name: "FredTermUI",
-            dependencies: ["FredTermCore", "FredTermConfig"],
+            name: "StrixTermUI",
+            dependencies: ["StrixTermCore", "StrixTermConfig"],
             exclude: platformExcludes,
             resources: [
                 .process("Renderer/Shaders.metal")
             ]
         ),
         .target(
-            name: "FredTerm",
-            dependencies: ["FredTermCore", "FredTermUI", "FredTermProcess", "FredTermConfig"]
+            name: "StrixTerm",
+            dependencies: ["StrixTermCore", "StrixTermUI", "StrixTermProcess", "StrixTermConfig"]
         ),
         .executableTarget(
-            name: "FredTermApp",
-            dependencies: ["FredTermCore", "FredTermUI", "FredTermProcess", "FredTermConfig"]
+            name: "StrixTermApp",
+            dependencies: ["StrixTermCore", "StrixTermUI", "StrixTermProcess", "StrixTermConfig"]
         ),
         .testTarget(
-            name: "FredTermCoreTests",
-            dependencies: ["FredTermCore"]
+            name: "StrixTermCoreTests",
+            dependencies: ["StrixTermCore"]
         ),
         .testTarget(
-            name: "FredTermProcessTests",
-            dependencies: ["FredTermProcess"]
+            name: "StrixTermProcessTests",
+            dependencies: ["StrixTermProcess"]
         ),
     ],
     swiftLanguageModes: [.v6]
