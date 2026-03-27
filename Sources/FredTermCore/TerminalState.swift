@@ -36,6 +36,9 @@ public struct TerminalState: @unchecked Sendable {
     public var promptState: SemanticPromptState = SemanticPromptState()
     public var kittyGraphics: KittyGraphicsState = KittyGraphicsState()
 
+    /// Text selection state.
+    public var selection: Selection = Selection()
+
     /// Active OSC 8 link tracking: when non-nil, all characters written
     /// will be tagged with this link ID until the link is closed.
     public var activeLinkTracking: (start: Position, linkId: UInt16)? = nil
@@ -93,19 +96,32 @@ public struct TerminalState: @unchecked Sendable {
     public mutating func resize(cols newCols: Int, rows newRows: Int) {
         guard newCols != cols || newRows != rows else { return }
         let oldCols = cols
-        let oldRows = rows
         cols = newCols
         rows = newRows
 
-        // Resize both buffers
-        normalBuffer.grid.resize(newCols: newCols, newRows: newRows,
-                                  newMaxLines: newRows + maxScrollback)
+        // Normal buffer: use reflow when column count changes and scrollback is available
+        if newCols != oldCols && maxScrollback > 0 {
+            ReflowEngine.reflow(
+                grid: &normalBuffer.grid,
+                oldCols: oldCols,
+                newCols: newCols,
+                newMaxLines: newRows + maxScrollback,
+                cursorX: &normalBuffer.cursorX,
+                cursorY: &normalBuffer.cursorY,
+                yBase: &normalBuffer.yBase,
+                yDisp: &normalBuffer.yDisp
+            )
+        } else {
+            normalBuffer.grid.resize(newCols: newCols, newRows: newRows,
+                                      newMaxLines: newRows + maxScrollback)
+        }
         normalBuffer.scrollTop = 0
         normalBuffer.scrollBottom = newRows - 1
         normalBuffer.marginLeft = 0
         normalBuffer.marginRight = newCols - 1
         normalBuffer.tabStops.resize(newCols)
 
+        // Alt buffer: never reflow, just simple resize and clear
         altBuffer.grid.resize(newCols: newCols, newRows: newRows,
                                newMaxLines: newRows)
         altBuffer.scrollTop = 0
@@ -113,13 +129,16 @@ public struct TerminalState: @unchecked Sendable {
         altBuffer.marginLeft = 0
         altBuffer.marginRight = newCols - 1
         altBuffer.tabStops.resize(newCols)
+        if activeBufferIsAlt {
+            // Clear alt buffer content on resize (standard behavior)
+            for line in 0..<min(newRows, altBuffer.grid.count) {
+                altBuffer.grid.clearLine(line)
+            }
+        }
 
         // Clamp cursors
         normalBuffer.clampCursor(modes: modes)
         altBuffer.clampCursor(modes: modes)
-
-        _ = oldCols
-        _ = oldRows
     }
 
     // MARK: - Buffer switching

@@ -168,6 +168,54 @@ fragment float4 decorationFragment(BackgroundVertex in [[stage_in]]) {
     return in.color;
 }
 
+// MARK: - Kitty Image Pass
+
+/// Vertex output for the image rendering pass.
+struct ImageVertex {
+    float4 position [[position]];
+    float2 texCoord;
+};
+
+/// Renders a Kitty graphics image as a textured quad.
+/// Buffer 0: float4 rect (x, y, width, height in pixels).
+/// Buffer 1: float2 viewport size.
+/// Buffer 2: float4 crop (u0, v0, u1, v1) normalized texture coords.
+vertex ImageVertex imageVertex(
+    uint vertexID [[vertex_id]],
+    constant float4 &rect [[buffer(0)]],
+    constant float2 &viewport [[buffer(1)]],
+    constant float4 &crop [[buffer(2)]]
+) {
+    // 6 vertices for a quad (2 triangles).
+    float2 corners[6] = {
+        float2(0, 0), float2(1, 0), float2(0, 1),
+        float2(1, 0), float2(1, 1), float2(0, 1)
+    };
+    float2 corner = corners[vertexID];
+
+    // Pixel position of this vertex.
+    float2 pos = rect.xy + corner * rect.zw;
+    // Convert to NDC.
+    float2 ndc = pos / viewport * 2.0 - 1.0;
+    ndc.y = -ndc.y;
+
+    // Interpolate texture coordinates within the crop region.
+    float2 uv = crop.xy + corner * (crop.zw - crop.xy);
+
+    ImageVertex out;
+    out.position = float4(ndc, 0, 1);
+    out.texCoord = uv;
+    return out;
+}
+
+fragment float4 imageFragment(
+    ImageVertex in [[stage_in]],
+    texture2d<float> tex [[texture(0)]]
+) {
+    constexpr sampler s(mag_filter::linear, min_filter::linear);
+    return tex.sample(s, in.texCoord);
+}
+
 // MARK: - Cursor Pass
 
 struct CursorUniforms {

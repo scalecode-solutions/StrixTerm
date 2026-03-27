@@ -52,6 +52,8 @@ public struct TerminalView: NSViewRepresentable {
     public var onTitleChanged: ((String) -> Void)?
     /// Optional callback invoked when the user opens a hyperlink (Command-click or tap).
     public var onOpenURL: ((String) -> Void)?
+    /// Optional callback invoked when the terminal bell rings.
+    public var onBell: (() -> Void)?
     /// Binding to toggle the find bar visibility from the backing view.
     @Binding var showFindBar: Bool
 
@@ -62,7 +64,8 @@ public struct TerminalView: NSViewRepresentable {
         onSendData: (([UInt8]) -> Void)? = nil,
         onSizeChanged: ((TerminalSize) -> Void)? = nil,
         onTitleChanged: ((String) -> Void)? = nil,
-        onOpenURL: ((String) -> Void)? = nil
+        onOpenURL: ((String) -> Void)? = nil,
+        onBell: (() -> Void)? = nil
     ) {
         self.terminal = terminal
         self.configuration = configuration
@@ -71,6 +74,7 @@ public struct TerminalView: NSViewRepresentable {
         self.onSizeChanged = onSizeChanged
         self.onTitleChanged = onTitleChanged
         self.onOpenURL = onOpenURL
+        self.onBell = onBell
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -87,6 +91,10 @@ public struct TerminalView: NSViewRepresentable {
         view.onPerformFindPanelAction = {
             context.coordinator.toggleFindBar()
         }
+        view.onBell = { [weak view] in
+            context.coordinator.parent.onBell?()
+            view?.visualBell()
+        }
         return view
     }
 
@@ -95,6 +103,10 @@ public struct TerminalView: NSViewRepresentable {
         nsView.configuration = configuration
         nsView.onPerformFindPanelAction = {
             context.coordinator.toggleFindBar()
+        }
+        nsView.onBell = { [weak nsView] in
+            context.coordinator.parent.onBell?()
+            nsView?.visualBell()
         }
     }
 
@@ -218,6 +230,8 @@ public struct TerminalView: UIViewRepresentable {
     public var onTitleChanged: ((String) -> Void)?
     /// Optional callback invoked when the user taps a hyperlink.
     public var onOpenURL: ((String) -> Void)?
+    /// Optional callback invoked when the terminal bell rings.
+    public var onBell: (() -> Void)?
 
     public init(
         terminal: Terminal,
@@ -225,7 +239,8 @@ public struct TerminalView: UIViewRepresentable {
         onSendData: (([UInt8]) -> Void)? = nil,
         onSizeChanged: ((TerminalSize) -> Void)? = nil,
         onTitleChanged: ((String) -> Void)? = nil,
-        onOpenURL: ((String) -> Void)? = nil
+        onOpenURL: ((String) -> Void)? = nil,
+        onBell: (() -> Void)? = nil
     ) {
         self.terminal = terminal
         self.configuration = configuration
@@ -233,6 +248,7 @@ public struct TerminalView: UIViewRepresentable {
         self.onSizeChanged = onSizeChanged
         self.onTitleChanged = onTitleChanged
         self.onOpenURL = onOpenURL
+        self.onBell = onBell
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -246,12 +262,20 @@ public struct TerminalView: UIViewRepresentable {
         )
         view.delegate = context.coordinator
         context.coordinator.parent = self
+        view.onBell = { [weak view] in
+            context.coordinator.parent.onBell?()
+            view?.visualBell()
+        }
         return view
     }
 
     public func updateUIView(_ uiView: IOSTerminalBackingView, context: Context) {
         context.coordinator.parent = self
         uiView.configuration = configuration
+        uiView.onBell = { [weak uiView] in
+            context.coordinator.parent.onBell?()
+            uiView?.visualBell()
+        }
     }
 
     // MARK: - Coordinator

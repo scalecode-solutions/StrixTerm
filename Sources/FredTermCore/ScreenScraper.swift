@@ -24,6 +24,14 @@ public struct TerminalSnapshot: Sendable {
     public let totalScrollback: Int
     /// The link table for resolving cell hyperlinks.
     public let linkTable: LinkTable
+    /// Whether reverse video (DECSCNM) is active.
+    public let reverseVideo: Bool
+    /// Whether synchronized output is active.
+    public let synchronizedOutput: Bool
+    /// Kitty graphics images keyed by image ID.
+    public let kittyImages: [UInt32: KittyImage]
+    /// Kitty graphics placements.
+    public let kittyPlacements: [KittyPlacementKey: KittyPlacement]
 
     init(state: TerminalState) {
         cols = state.cols
@@ -35,6 +43,10 @@ public struct TerminalSnapshot: Sendable {
         attributes = state.attributes
         palette = state.palette
         linkTable = state.links
+        reverseVideo = state.modes.reverseVideo
+        synchronizedOutput = state.modes.synchronizedOutput
+        kittyImages = state.kittyGraphics.imagesById
+        kittyPlacements = state.kittyGraphics.placements
 
         let yBase = state.buffer.yBase
         let yDisp = state.buffer.yDisp

@@ -109,7 +109,24 @@ extension TerminalSession: ProcessHostDelegate {
 
 extension TerminalSession: TerminalDelegate {
     nonisolated func terminal(_ terminal: Terminal, produced actions: [TerminalAction]) {
-        // Actions like title changes, bell, etc. handled here
+        for action in actions {
+            switch action {
+            case .bell:
+                DispatchQueue.main.async {
+                    NSSound.beep()
+                }
+            case .clipboardCopy(let str):
+                DispatchQueue.main.async {
+                    let pb = NSPasteboard.general
+                    pb.clearContents()
+                    pb.setString(str, forType: .string)
+                }
+            case .setTitle(let title):
+                _ = title  // Window title updates handled by SwiftUI
+            default:
+                break
+            }
+        }
     }
 
     nonisolated func terminal(_ terminal: Terminal, sendData data: [UInt8]) {

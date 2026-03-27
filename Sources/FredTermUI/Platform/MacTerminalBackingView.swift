@@ -162,13 +162,16 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
 
     public override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
-        if result && terminal.applicationCursorKeys {
-            // Terminal has focus - could send focus event if sendFocus mode is on
+        if result && terminal.sendsFocusEvents {
+            delegate?.terminalView(self, sendData: Array("\u{1b}[I".utf8))
         }
         return result
     }
 
     public override func resignFirstResponder() -> Bool {
+        if terminal.sendsFocusEvents {
+            delegate?.terminalView(self, sendData: Array("\u{1b}[O".utf8))
+        }
         return super.resignFirstResponder()
     }
 
@@ -310,6 +313,7 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
         mouseDownPosition = pos
         selectionStart = pos
         selectionEnd = pos
+        terminal.startSelection(at: pos)
         needsDisplay = true
     }
 
@@ -327,6 +331,7 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
             return
         }
         selectionEnd = pos
+        terminal.extendSelection(to: pos)
         needsDisplay = true
     }
 
@@ -353,6 +358,7 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
 
         selectionEnd = pos
         mouseDownPosition = nil
+        terminal.extendSelection(to: pos)
         // Selection is now finalized between selectionStart and selectionEnd
         needsDisplay = true
     }
@@ -575,6 +581,38 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
         addTrackingArea(trackingArea)
     }
 
+    // MARK: - Copy / Paste
+
+    /// Copy the current selection to the pasteboard (Cmd+C).
+    @objc public func copy(_ sender: Any?) {
+        guard let text = terminal.selectedText(), !text.isEmpty else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+    }
+
+    /// Paste from the pasteboard into the terminal (Cmd+V).
+    @objc public func paste(_ sender: Any?) {
+        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return }
+        terminal.paste(text)
+    }
+
+    // MARK: - Bell
+
+    /// Callback invoked when the terminal rings the bell.
+    public var onBell: (() -> Void)?
+
+    /// Flash the view background briefly for a visual bell effect.
+    public func visualBell() {
+        let flashLayer = CALayer()
+        flashLayer.backgroundColor = NSColor.white.withAlphaComponent(0.15).cgColor
+        flashLayer.frame = bounds
+        layer?.addSublayer(flashLayer)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            flashLayer.removeFromSuperlayer()
+        }
+    }
+
     // MARK: - Find Panel
 
     /// Callback invoked when the user triggers Cmd+F (or Edit > Find).
@@ -586,9 +624,12 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
         onPerformFindPanelAction?()
     }
 
-    /// Override to include find in the responder chain.
+    /// Override to include find, copy, and paste in the responder chain.
     public override func responds(to aSelector: Selector!) -> Bool {
         if aSelector == #selector(performFindPanelAction(_:)) {
+            return true
+        }
+        if aSelector == #selector(copy(_:)) || aSelector == #selector(paste(_:)) {
             return true
         }
         return super.responds(to: aSelector)
@@ -633,6 +674,84 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
         terminal.scrollToBottom()
         terminal.sendInput(data)
         delegate?.terminalView(self, sendData: data)
+    }
+
+    // MARK: - Scrollbar
+
+    /// The overlay scroller for navigating scrollback.
+    private lazy var scroller: NSScroller = {
+        let s = NSScroller(frame: .zero)
+        s.scrollerStyle = .overlay
+        s.alphaValue = 0.0
+        s.target = self
+        s.action = #selector(scrollerAction(_:))
+        addSubview(s)
+        return s
+    }()
+
+    /// Update the scroller's position and visibility based on scrollback state.
+    public func updateScroller() {
+        let snapshot = terminal.snapshot()
+        let totalScrollback = snapshot.totalScrollback
+        let scrollOffset = snapshot.scrollOffset
+
+        if totalScrollback <= 0 {
+            scroller.isHidden = true
+            return
+        }
+
+        scroller.isHidden = false
+
+        let scrollerWidth: CGFloat = 14.0
+        scroller.frame = NSRect(
+            x: bounds.width - scrollerWidth,
+            y: 0,
+            width: scrollerWidth,
+            height: bounds.height
+        )
+
+        let totalLines = CGFloat(totalScrollback + terminalSize.rows)
+        let proportion = CGFloat(terminalSize.rows) / totalLines
+        let position = 1.0 - CGFloat(scrollOffset) / CGFloat(totalScrollback)
+
+        scroller.doubleValue = Double(position)
+        scroller.knobProportion = proportion
+
+        // Fade in/out based on whether user has scrolled
+        let targetAlpha: CGFloat = scrollOffset > 0 ? 0.7 : 0.0
+        if scroller.alphaValue != targetAlpha {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.3
+                scroller.animator().alphaValue = targetAlpha
+            }
+        }
+    }
+
+    /// Handle scroller action (user dragged the scroller knob).
+    @objc private func scrollerAction(_ sender: NSScroller) {
+        switch sender.hitPart {
+        case .knob, .knobSlot:
+            let snapshot = terminal.snapshot()
+            let totalScrollback = snapshot.totalScrollback
+            let scrollPos = 1.0 - sender.doubleValue
+            let targetOffset = Int(scrollPos * Double(totalScrollback))
+            let currentOffset = snapshot.scrollOffset
+            let delta = targetOffset - currentOffset
+            if delta != 0 {
+                terminal.scroll(delta: delta)
+            }
+        case .decrementLine:
+            terminal.scroll(delta: 1)
+        case .incrementLine:
+            terminal.scroll(delta: -1)
+        case .decrementPage:
+            terminal.scroll(delta: terminalSize.rows)
+        case .incrementPage:
+            terminal.scroll(delta: -terminalSize.rows)
+        default:
+            break
+        }
+        metalView?.needsDisplay = true
     }
 }
 

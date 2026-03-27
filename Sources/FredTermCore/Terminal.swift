@@ -386,6 +386,73 @@ public final class Terminal: @unchecked Sendable {
         delegate?.terminalNeedsDisplay(self)
     }
 
+    // MARK: - Selection
+
+    /// Start a new text selection at the given position.
+    public func startSelection(at position: Position, mode: Selection.SelectionMode = .character) {
+        lock.lock()
+        state.selection = Selection(from: position, to: position, mode: mode)
+        lock.unlock()
+    }
+
+    /// Extend the current selection to the given position.
+    public func extendSelection(to position: Position) {
+        lock.lock()
+        state.selection.end = position
+        state.selection.active = true
+        lock.unlock()
+    }
+
+    /// Clear the current selection.
+    public func clearSelection() {
+        lock.lock()
+        state.selection.clear()
+        lock.unlock()
+    }
+
+    /// Get the currently selected text, or nil if no selection is active.
+    public func selectedText() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard state.selection.active else { return nil }
+        let text = state.selection.getText(
+            from: state.buffer.grid,
+            yBase: state.buffer.yBase,
+            graphemes: state.graphemes
+        )
+        return text.isEmpty ? nil : text
+    }
+
+    /// The current selection state.
+    public var selection: Selection {
+        lock.lock()
+        defer { lock.unlock() }
+        return state.selection
+    }
+
+    // MARK: - Mode queries
+
+    /// Whether the terminal wants focus in/out event reports.
+    public var sendsFocusEvents: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return state.modes.sendFocus
+    }
+
+    /// Whether synchronized output mode is active.
+    public var synchronizedOutput: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return state.modes.synchronizedOutput
+    }
+
+    /// Whether reverse video (DECSCNM) mode is active.
+    public var reverseVideo: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return state.modes.reverseVideo
+    }
+
     // MARK: - Private
 
     private func dispatchActions(_ actions: [TerminalAction]) {

@@ -229,11 +229,50 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
     public override var canBecomeFirstResponder: Bool { true }
 
     public override func becomeFirstResponder() -> Bool {
-        return super.becomeFirstResponder()
+        let result = super.becomeFirstResponder()
+        if result && terminal.sendsFocusEvents {
+            delegate?.terminalView(self, sendData: Array("\u{1b}[I".utf8))
+        }
+        return result
     }
 
     public override func resignFirstResponder() -> Bool {
+        if terminal.sendsFocusEvents {
+            delegate?.terminalView(self, sendData: Array("\u{1b}[O".utf8))
+        }
         return super.resignFirstResponder()
+    }
+
+    // MARK: - Copy / Paste
+
+    /// Copy the current selection to the system pasteboard.
+    public func copySelection() {
+        guard let text = terminal.selectedText(), !text.isEmpty else { return }
+        UIPasteboard.general.string = text
+    }
+
+    /// Paste from the system pasteboard into the terminal.
+    public func pasteFromClipboard() {
+        guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
+        terminal.paste(text)
+    }
+
+    // MARK: - Bell
+
+    /// Callback invoked when the terminal rings the bell.
+    public var onBell: (() -> Void)?
+
+    /// Flash the view background briefly for a visual bell effect.
+    public func visualBell() {
+        let flashView = UIView(frame: bounds)
+        flashView.backgroundColor = UIColor.white.withAlphaComponent(0.15)
+        flashView.isUserInteractionEnabled = false
+        addSubview(flashView)
+        UIView.animate(withDuration: 0.1, animations: {
+            flashView.alpha = 0.0
+        }) { _ in
+            flashView.removeFromSuperview()
+        }
     }
 
     // MARK: - UIKeyInput
@@ -418,6 +457,8 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
         )
         selectionStart = boundaries.start
         selectionEnd = boundaries.end
+        terminal.startSelection(at: boundaries.start, mode: .word)
+        terminal.extendSelection(to: boundaries.end)
         setNeedsDisplay()
     }
 
@@ -431,6 +472,8 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
         // Select entire line (addresses SwiftTerm issue #282)
         selectionStart = Position(col: 0, row: pos.row)
         selectionEnd = Position(col: terminalSize.cols - 1, row: pos.row)
+        terminal.startSelection(at: Position(col: 0, row: pos.row), mode: .line)
+        terminal.extendSelection(to: Position(col: terminalSize.cols - 1, row: pos.row))
         setNeedsDisplay()
     }
 
@@ -450,15 +493,18 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
             isLongPressActive = true
             selectionStart = pos
             selectionEnd = pos
+            terminal.startSelection(at: pos)
             setNeedsDisplay()
         case .changed:
             if isLongPressActive {
                 selectionEnd = pos
+                terminal.extendSelection(to: pos)
                 setNeedsDisplay()
             }
         case .ended, .cancelled:
             if isLongPressActive {
                 selectionEnd = pos
+                terminal.extendSelection(to: pos)
                 isLongPressActive = false
                 setNeedsDisplay()
             }

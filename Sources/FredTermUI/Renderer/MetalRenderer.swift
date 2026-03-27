@@ -94,6 +94,7 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
     private let glyphPipeline: MTLRenderPipelineState
     private let decorationPipeline: MTLRenderPipelineState
     private let cursorPipeline: MTLRenderPipelineState
+    private let imagePipeline: MTLRenderPipelineState
 
     // MARK: - Glyph System
 
@@ -129,6 +130,11 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
 
     /// Per-row content hashes from the previous frame.
     private var previousRowHashes: [UInt64] = []
+
+    // MARK: - Kitty Image Texture Cache
+
+    /// GPU textures for Kitty graphics images, keyed by image ID.
+    private var imageTextureCache: [UInt32: MTLTexture] = [:]
 
     // MARK: - GPU Buffers
 
@@ -196,7 +202,8 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
         guard let bgPipeline = Self.makeBackgroundPipeline(device: device, library: library),
               let glPipeline = Self.makeGlyphPipeline(device: device, library: library),
               let decPipeline = Self.makeDecorationPipeline(device: device, library: library),
-              let cuPipeline = Self.makeCursorPipeline(device: device, library: library) else {
+              let cuPipeline = Self.makeCursorPipeline(device: device, library: library),
+              let imgPipeline = Self.makeImagePipeline(device: device, library: library) else {
             return nil
         }
 
@@ -204,6 +211,7 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
         self.glyphPipeline = glPipeline
         self.decorationPipeline = decPipeline
         self.cursorPipeline = cuPipeline
+        self.imagePipeline = imgPipeline
 
         // Pre-allocate uniform buffers.
         self.uniformBuffer = device.makeBuffer(
@@ -229,17 +237,35 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
         // 1. Take a snapshot from the terminal.
         let snapshot = terminal.snapshot()
 
+        // Synchronized output: skip rendering while the mode is active.
+        // When the application turns off synchronized output, the next
+        // draw call will render all accumulated changes at once.
+        if snapshot.synchronizedOutput {
+            return
+        }
+
         guard let drawable = view.currentDrawable,
               let renderPassDescriptor = view.currentRenderPassDescriptor else {
             return
         }
 
-        // Set clear color to the default background.
+        // Determine effective default colors (swap for DECSCNM reverse video).
+        let effectiveFG: SIMD4<Float>
+        let effectiveBG: SIMD4<Float>
+        if snapshot.reverseVideo {
+            effectiveFG = defaultBG
+            effectiveBG = defaultFG
+        } else {
+            effectiveFG = defaultFG
+            effectiveBG = defaultBG
+        }
+
+        // Set clear color to the effective background.
         renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(
-            red: Double(defaultBG.x),
-            green: Double(defaultBG.y),
-            blue: Double(defaultBG.z),
-            alpha: Double(defaultBG.w)
+            red: Double(effectiveBG.x),
+            green: Double(effectiveBG.y),
+            blue: Double(effectiveBG.z),
+            alpha: Double(effectiveBG.w)
         )
         renderPassDescriptor.colorAttachments[0].loadAction = .clear
         renderPassDescriptor.colorAttachments[0].storeAction = .store
@@ -281,8 +307,8 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
                 }
 
                 let attr = snapshot.attribute(for: cell)
-                var fgColor = resolveColor(attr.fg, palette: snapshot.palette, isDefault: true)
-                var bgColor = resolveColor(attr.bg, palette: snapshot.palette, isDefault: false)
+                var fgColor = resolveColor(attr.fg, palette: snapshot.palette, isDefault: true, effectiveFG: effectiveFG, effectiveBG: effectiveBG)
+                var bgColor = resolveColor(attr.bg, palette: snapshot.palette, isDefault: false, effectiveFG: effectiveFG, effectiveBG: effectiveBG)
 
                 // Build flags.
                 var styleFlags: UInt32 = 0
@@ -370,7 +396,7 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
                 // Determine the decoration color: use underlineColor if set, otherwise fg.
                 let decoColor: SIMD4<Float>
                 if let ulColor = attr.underlineColor {
-                    decoColor = resolveColor(ulColor, palette: snapshot.palette, isDefault: true)
+                    decoColor = resolveColor(ulColor, palette: snapshot.palette, isDefault: true, effectiveFG: effectiveFG, effectiveBG: effectiveBG)
                 } else {
                     decoColor = fgColor
                 }
@@ -577,6 +603,9 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
             )
         }
 
+        // Kitty image pass.
+        renderKittyImages(snapshot: snapshot, encoder: encoder, viewportSize: viewportSize)
+
         // Cursor pass.
         if snapshot.cursorVisible {
             let cursorRow = snapshot.cursorPosition.row
@@ -593,7 +622,7 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
                 position: SIMD2<Float>(Float(cursorCol), Float(cursorRow)),
                 cellSize: SIMD2<Float>(Float(cellWidth), Float(cellHeight)),
                 viewportSize: viewportSize,
-                color: defaultFG,
+                color: effectiveFG,
                 style: cursorShapeValue,
                 blinkPhase: cursorBlinkPhase
             )
@@ -623,6 +652,36 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
     }
 
     // MARK: - Color Resolution
+
+    /// Resolve a `TerminalColor` to an RGBA float4, using provided effective defaults
+    /// (which account for DECSCNM reverse video).
+    private func resolveColor(
+        _ color: TerminalColor,
+        palette: ColorPalette,
+        isDefault: Bool,
+        effectiveFG: SIMD4<Float>,
+        effectiveBG: SIMD4<Float>
+    ) -> SIMD4<Float> {
+        switch color {
+        case .default:
+            return isDefault ? effectiveFG : effectiveBG
+        case .indexed(let idx):
+            let entry = palette.colors[Int(idx)]
+            return SIMD4<Float>(
+                Float(entry.r) / 255.0,
+                Float(entry.g) / 255.0,
+                Float(entry.b) / 255.0,
+                Float(entry.a) / 255.0
+            )
+        case .rgb(let r, let g, let b):
+            return SIMD4<Float>(
+                Float(r) / 255.0,
+                Float(g) / 255.0,
+                Float(b) / 255.0,
+                1.0
+            )
+        }
+    }
 
     /// Resolve a `TerminalColor` to an RGBA float4.
     private func resolveColor(
@@ -954,6 +1013,238 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
 
         boxDrawingCache[codePoint] = entry
         return entry
+    }
+
+    // MARK: - Image Pipeline Construction
+
+    private static func makeImagePipeline(
+        device: MTLDevice,
+        library: MTLLibrary
+    ) -> MTLRenderPipelineState? {
+        guard let vertexFunc = library.makeFunction(name: "imageVertex"),
+              let fragmentFunc = library.makeFunction(name: "imageFragment") else {
+            return nil
+        }
+
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = vertexFunc
+        descriptor.fragmentFunction = fragmentFunc
+        descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+
+        // Enable alpha blending for images (they may have transparent pixels).
+        descriptor.colorAttachments[0].isBlendingEnabled = true
+        descriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+        descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        descriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
+        descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+
+        return try? device.makeRenderPipelineState(descriptor: descriptor)
+    }
+
+    // MARK: - Kitty Image Texture Management
+
+    /// Create an MTLTexture from a KittyImage's RGBA pixel data.
+    private func createImageTexture(from image: KittyImage) -> MTLTexture? {
+        guard image.width > 0, image.height > 0 else { return nil }
+
+        // Check if this is PNG data (starts with PNG signature) that needs
+        // decoding. The protocol parser stores raw PNG for format 100; the
+        // rendering layer must decode it to RGBA.
+        let pngSignature: [UInt8] = [137, 80, 78, 71, 13, 10, 26, 10]
+        let isPng = image.data.count >= 8 && image.data.prefix(8).elementsEqual(pngSignature)
+
+        let rgbaData: Data
+        let texWidth: Int
+        let texHeight: Int
+
+        if isPng {
+            guard let decoded = Self.decodePngToRGBA(image.data) else { return nil }
+            rgbaData = decoded.data
+            texWidth = decoded.width
+            texHeight = decoded.height
+        } else {
+            // Already RGBA pixel data.
+            let expectedSize = image.width * image.height * 4
+            guard image.data.count >= expectedSize else { return nil }
+            rgbaData = image.data
+            texWidth = image.width
+            texHeight = image.height
+        }
+
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba8Unorm,
+            width: texWidth,
+            height: texHeight,
+            mipmapped: false
+        )
+        descriptor.usage = .shaderRead
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+
+        rgbaData.withUnsafeBytes { ptr in
+            guard let baseAddress = ptr.baseAddress else { return }
+            texture.replace(
+                region: MTLRegion(
+                    origin: MTLOrigin(x: 0, y: 0, z: 0),
+                    size: MTLSize(width: texWidth, height: texHeight, depth: 1)
+                ),
+                mipmapLevel: 0,
+                withBytes: baseAddress,
+                bytesPerRow: texWidth * 4
+            )
+        }
+
+        return texture
+    }
+
+    /// Decode PNG data to RGBA pixels using CoreGraphics.
+    private static func decodePngToRGBA(_ pngData: Data) -> (data: Data, width: Int, height: Int)? {
+        #if canImport(CoreGraphics)
+        guard let provider = CGDataProvider(data: pngData as CFData),
+              let cgImage = CGImage(
+                pngDataProviderSource: provider,
+                decode: nil,
+                shouldInterpolate: true,
+                intent: .defaultIntent
+              ) else {
+            return nil
+        }
+
+        let width = cgImage.width
+        let height = cgImage.height
+        let bytesPerRow = width * 4
+        var pixelData = Data(count: height * bytesPerRow)
+
+        guard let context = pixelData.withUnsafeMutableBytes({ ptr -> CGContext? in
+            CGContext(
+                data: ptr.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        }) else {
+            return nil
+        }
+
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return (pixelData, width, height)
+        #else
+        return nil
+        #endif
+    }
+
+    /// Synchronize the image texture cache with the current snapshot.
+    /// Creates textures for new images and removes textures for deleted ones.
+    private func syncImageTextures(snapshot: TerminalSnapshot) {
+        // Collect image IDs referenced by current placements.
+        let referencedIds = Set(snapshot.kittyPlacements.values.map { $0.imageId })
+
+        // Remove textures for images no longer in the snapshot.
+        let cachedIds = Set(imageTextureCache.keys)
+        for id in cachedIds {
+            if snapshot.kittyImages[id] == nil {
+                imageTextureCache.removeValue(forKey: id)
+            }
+        }
+
+        // Create textures for new images that have placements.
+        for imageId in referencedIds {
+            if imageTextureCache[imageId] == nil,
+               let image = snapshot.kittyImages[imageId] {
+                imageTextureCache[imageId] = createImageTexture(from: image)
+            }
+        }
+    }
+
+    // MARK: - Kitty Image Rendering
+
+    /// Render all visible Kitty graphics image placements.
+    private func renderKittyImages(
+        snapshot: TerminalSnapshot,
+        encoder: MTLRenderCommandEncoder,
+        viewportSize: SIMD2<Float>
+    ) {
+        guard !snapshot.kittyPlacements.isEmpty else { return }
+
+        // Sync texture cache with current snapshot state.
+        syncImageTextures(snapshot: snapshot)
+
+        let cw = Float(cellWidth)
+        let ch = Float(cellHeight)
+
+        // Sort placements by z-index for correct layering.
+        let sortedPlacements = snapshot.kittyPlacements.values.sorted { $0.zIndex < $1.zIndex }
+
+        encoder.setRenderPipelineState(imagePipeline)
+
+        for placement in sortedPlacements {
+            // Skip virtual (Unicode placeholder) placements -- they are rendered inline.
+            if placement.isVirtual { continue }
+
+            guard let texture = imageTextureCache[placement.imageId] else { continue }
+
+            // Only draw placements that overlap the visible row range.
+            let placementEndRow = placement.row + max(placement.rows, 1) - 1
+            if placement.row >= snapshot.rows || placementEndRow < 0 { continue }
+
+            // Calculate pixel position from cell coordinates.
+            let pixelX = Float(placement.col) * cw + Float(placement.pixelOffsetX)
+            let pixelY = Float(placement.row) * ch + Float(placement.pixelOffsetY)
+
+            // Determine the image dimensions from the source.
+            let image = snapshot.kittyImages[placement.imageId]
+            let imgWidth = image?.width ?? texture.width
+            let imgHeight = image?.height ?? texture.height
+
+            // Calculate destination size.
+            let destWidth: Float
+            let destHeight: Float
+            if placement.cols > 0 {
+                destWidth = Float(placement.cols) * cw
+            } else {
+                destWidth = Float(imgWidth)
+            }
+            if placement.rows > 0 {
+                destHeight = Float(placement.rows) * ch
+            } else {
+                destHeight = Float(imgHeight)
+            }
+
+            // Calculate crop region as normalized texture coordinates [0..1].
+            let u0: Float
+            let v0: Float
+            let u1: Float
+            let v1: Float
+            if placement.cropWidth > 0 || placement.cropHeight > 0 || placement.cropX > 0 || placement.cropY > 0 {
+                let cX = Float(placement.cropX)
+                let cY = Float(placement.cropY)
+                let cW = placement.cropWidth > 0 ? Float(placement.cropWidth) : Float(imgWidth) - cX
+                let cH = placement.cropHeight > 0 ? Float(placement.cropHeight) : Float(imgHeight) - cY
+                u0 = cX / Float(imgWidth)
+                v0 = cY / Float(imgHeight)
+                u1 = (cX + cW) / Float(imgWidth)
+                v1 = (cY + cH) / Float(imgHeight)
+            } else {
+                u0 = 0
+                v0 = 0
+                u1 = 1
+                v1 = 1
+            }
+
+            // Upload per-placement uniforms.
+            var rect = SIMD4<Float>(pixelX, pixelY, destWidth, destHeight)
+            var viewport = viewportSize
+            var crop = SIMD4<Float>(u0, v0, u1, v1)
+
+            encoder.setVertexBytes(&rect, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
+            encoder.setVertexBytes(&viewport, length: MemoryLayout<SIMD2<Float>>.stride, index: 1)
+            encoder.setVertexBytes(&crop, length: MemoryLayout<SIMD4<Float>>.stride, index: 2)
+            encoder.setFragmentTexture(texture, index: 0)
+
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+        }
     }
 }
 
