@@ -61,10 +61,22 @@ public struct TerminalSnapshot: Sendable {
 
         for row in 0..<rows {
             let lineIdx = yDisp + row
-            for col in 0..<cols {
-                visibleCells.append(state.buffer.grid[lineIdx, col])
+            if lineIdx >= 0 && lineIdx < state.buffer.grid.count {
+                for col in 0..<cols {
+                    if col < state.buffer.grid.cols {
+                        visibleCells.append(state.buffer.grid[lineIdx, col])
+                    } else {
+                        visibleCells.append(.blank)
+                    }
+                }
+                lineMeta.append(state.buffer.grid[lineMetadata: lineIdx])
+            } else {
+                // Line doesn't exist yet (can happen during resize race)
+                for _ in 0..<cols {
+                    visibleCells.append(.blank)
+                }
+                lineMeta.append(.blank)
             }
-            lineMeta.append(state.buffer.grid[lineMetadata: lineIdx])
         }
 
         cells = visibleCells

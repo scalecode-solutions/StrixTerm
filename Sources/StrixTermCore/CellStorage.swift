@@ -220,16 +220,22 @@ public struct CellGrid: @unchecked Sendable {
         top: Int, bottom: Int, count scrollCount: Int,
         fillAttribute: UInt32 = 0
     ) {
+        guard bottom > top else { return }
         let n = min(scrollCount, bottom - top)
         if n <= 0 { return }
 
         // Copy lines up
-        for dst in top..<(bottom - n) {
-            let src = dst + n
-            copyLine(from: src, to: dst)
+        if bottom - n > top {
+            for dst in top..<(bottom - n) {
+                let src = dst + n
+                guard src >= 0 && src < count && dst >= 0 && dst < count else { continue }
+                copyLine(from: src, to: dst)
+            }
         }
         // Blank the new bottom lines
-        for line in (bottom - n)..<bottom {
+        let blankStart = max(top, bottom - n)
+        for line in blankStart..<bottom {
+            guard line >= 0 && line < count else { continue }
             clearLine(line, fillAttribute: fillAttribute)
             self[lineMetadata: line] = .blank
         }
@@ -241,16 +247,20 @@ public struct CellGrid: @unchecked Sendable {
         top: Int, bottom: Int, count scrollCount: Int,
         fillAttribute: UInt32 = 0
     ) {
+        guard bottom > top else { return }
         let n = min(scrollCount, bottom - top)
         if n <= 0 { return }
 
         // Copy lines down (iterate in reverse to avoid overwriting)
         for dst in stride(from: bottom - 1, through: top + n, by: -1) {
             let src = dst - n
+            guard src >= 0 && src < count && dst >= 0 && dst < count else { continue }
             copyLine(from: src, to: dst)
         }
         // Blank the new top lines
-        for line in top..<(top + n) {
+        let blankEnd = min(bottom, top + n)
+        for line in top..<blankEnd {
+            guard line >= 0 && line < count else { continue }
             clearLine(line, fillAttribute: fillAttribute)
             self[lineMetadata: line] = .blank
         }
