@@ -82,6 +82,9 @@ fragment float4 backgroundFragment(BackgroundVertex in [[stage_in]]) {
 // MARK: - Glyph Pass
 
 /// Renders glyphs from the atlas texture.
+/// glyphSize = normalized UV dimensions in the atlas.
+/// glyphOffset = normalized UV origin in the atlas.
+/// The quad covers the full cell area (cellSize from uniforms).
 vertex GlyphVertex glyphVertex(
     uint vertexID [[vertex_id]],
     uint instanceID [[instance_id]],
@@ -90,25 +93,22 @@ vertex GlyphVertex glyphVertex(
 ) {
     CellData cell = cells[instanceID];
 
-    float2 positions[6] = {
+    float2 corners[6] = {
         float2(0, 0), float2(1, 0), float2(0, 1),
         float2(1, 0), float2(1, 1), float2(0, 1)
     };
 
-    float2 texCoords[6] = {
-        float2(0, 0), float2(1, 0), float2(0, 1),
-        float2(1, 0), float2(1, 1), float2(0, 1)
-    };
+    float2 corner = corners[vertexID];
 
-    float2 pos = positions[vertexID];
+    // Position: fill the full cell
     float2 cellPos = float2(cell.position) * uniforms.cellSize + uniforms.gridOrigin;
-    float2 worldPos = cellPos + pos * cell.glyphSize;
+    float2 worldPos = cellPos + corner * uniforms.cellSize;
 
     float2 ndc = worldPos / uniforms.viewportSize * 2.0 - 1.0;
     ndc.y = -ndc.y;
 
-    // Map texture coordinates to the atlas region
-    float2 texCoord = cell.glyphOffset + texCoords[vertexID] * cell.glyphSize;
+    // Texture coordinates: map corner [0,1] to the glyph's region in the atlas
+    float2 texCoord = cell.glyphOffset + corner * cell.glyphSize;
 
     GlyphVertex out;
     out.position = float4(ndc, 0, 1);

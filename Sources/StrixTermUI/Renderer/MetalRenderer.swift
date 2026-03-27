@@ -473,6 +473,10 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
                             atlasWidth: atlas.atlasWidth,
                             atlasHeight: atlas.atlasHeight
                         )
+                        let (uvW, uvH) = entry.region.uvSize(
+                            atlasWidth: atlas.atlasWidth,
+                            atlasHeight: atlas.atlasHeight
+                        )
 
                         let glyphData = GPUCellData(
                             position: SIMD2<UInt32>(UInt32(col), UInt32(row)),
@@ -480,7 +484,7 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
                             bgColor: bgColor,
                             glyphIndex: 1,
                             flags: styleFlags,
-                            glyphSize: SIMD2<Float>(Float(entry.region.width), Float(entry.region.height)),
+                            glyphSize: SIMD2<Float>(uvW, uvH),
                             glyphOffset: SIMD2<Float>(uvX, uvY)
                         )
                         glyphCells.append(glyphData)
@@ -506,16 +510,17 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
                         atlasHeight: atlas.atlasHeight
                     )
 
+                    // glyphSize = normalized UV size (for texture sampling)
+                    // glyphOffset = normalized UV origin
                     let glyphData = GPUCellData(
                         position: SIMD2<UInt32>(UInt32(col), UInt32(row)),
                         fgColor: fgColor,
                         bgColor: bgColor,
                         glyphIndex: 1, // Non-zero means has glyph
                         flags: styleFlags,
-                        glyphSize: SIMD2<Float>(Float(entry.region.width), Float(entry.region.height)),
+                        glyphSize: SIMD2<Float>(uvW, uvH),
                         glyphOffset: SIMD2<Float>(uvX, uvY)
                     )
-                    _ = (uvW, uvH) // UV size used by shader via glyphSize / atlas size
                     glyphCells.append(glyphData)
                 }
             }
