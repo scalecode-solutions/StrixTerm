@@ -121,8 +121,9 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
         let mtkView = MTKView(frame: bounds, device: device)
         mtkView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         mtkView.isOpaque = true
-        mtkView.isPaused = true
-        mtkView.enableSetNeedsDisplay = true
+        mtkView.isPaused = false
+        mtkView.preferredFramesPerSecond = 60
+        mtkView.enableSetNeedsDisplay = false
         addSubview(mtkView)
         self.metalView = mtkView
 
@@ -136,8 +137,8 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
             )
             if let renderer = renderer {
                 mtkView.delegate = renderer
-                cellWidth = renderer.cellSize.width
-                cellHeight = renderer.cellSize.height
+                cellWidth = renderer.reportedCellWidth
+                cellHeight = renderer.reportedCellHeight
             }
         }
 

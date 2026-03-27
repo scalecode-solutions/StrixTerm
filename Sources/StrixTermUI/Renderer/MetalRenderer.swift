@@ -114,6 +114,10 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
     private let descent: CGFloat
     private let leading: CGFloat
 
+    /// Publicly accessible cell dimensions for grid size calculation.
+    public var reportedCellWidth: CGFloat { cellWidth }
+    public var reportedCellHeight: CGFloat { cellHeight }
+
     // MARK: - Default Colors
 
     private var defaultFG: SIMD4<Float> = SIMD4<Float>(0.9, 0.9, 0.9, 1.0)

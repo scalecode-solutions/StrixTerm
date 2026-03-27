@@ -109,17 +109,33 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
         layer?.backgroundColor = NSColor.black.cgColor
 
         // Create the Metal view
-        let device = MTLCreateSystemDefaultDevice()
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
         let mtkView = MTKView(frame: bounds, device: device)
         mtkView.autoresizingMask = [.width, .height]
         mtkView.layer?.isOpaque = true
-        mtkView.isPaused = true
-        mtkView.enableSetNeedsDisplay = true
+        // Use a 60fps display link instead of manual setNeedsDisplay
+        mtkView.isPaused = false
+        mtkView.preferredFramesPerSecond = 60
+        mtkView.enableSetNeedsDisplay = false
         addSubview(mtkView)
         self.metalView = mtkView
 
-        // Compute initial cell dimensions from the configured font
-        updateCellDimensions()
+        // Create the Metal renderer and wire it as the MTKView's delegate
+        if let metalRenderer = MetalRenderer(
+            device: device,
+            terminal: terminal,
+            fontFamily: configuration.fontFamily,
+            fontSize: configuration.fontSize
+        ) {
+            self.renderer = metalRenderer
+            mtkView.delegate = metalRenderer
+            // Use the renderer's cell metrics for accurate grid sizing
+            cellWidth = metalRenderer.reportedCellWidth
+            cellHeight = metalRenderer.reportedCellHeight
+        } else {
+            // Fallback: compute cell dimensions from NSFont
+            updateCellDimensions()
+        }
     }
 
     /// Recompute cell dimensions from the current font configuration.
