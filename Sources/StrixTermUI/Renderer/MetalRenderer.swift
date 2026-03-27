@@ -135,6 +135,9 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
     /// Per-row content hashes from the previous frame.
     private var previousRowHashes: [UInt64] = []
 
+    /// Current backing scale factor (updated each frame).
+    private var currentScale: CGFloat = 1.0
+
     // MARK: - Kitty Image Texture Cache
 
     /// GPU textures for Kitty graphics images, keyed by image ID.
@@ -291,6 +294,15 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
             Float(view.drawableSize.height)
         )
 
+        // Compute the scale factor (Retina displays have drawableSize > bounds).
+        // Cell dimensions are in points; Metal works in pixels.
+        let scale: CGFloat
+        if view.bounds.width > 0 {
+            scale = view.drawableSize.width / view.bounds.width
+        } else {
+            scale = 1.0
+        }
+
         // Update blink state.
         let now = CACurrentMediaTime()
         if now - lastBlinkToggle >= blinkInterval {
@@ -310,8 +322,10 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
         bgCells.reserveCapacity(cols * rows)
         glyphCells.reserveCapacity(cols * rows)
 
-        let cw = Float(cellWidth)
-        let ch = Float(cellHeight)
+        // Cell size in pixels (points * scale for Retina).
+        currentScale = scale
+        let cw = Float(cellWidth * scale)
+        let ch = Float(cellHeight * scale)
 
         for row in 0..<rows {
             for col in 0..<cols {
@@ -554,7 +568,7 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
 
         // Update uniforms.
         var uniforms = GPUUniforms(
-            cellSize: SIMD2<Float>(Float(cellWidth), Float(cellHeight)),
+            cellSize: SIMD2<Float>(cw, ch),
             viewportSize: viewportSize,
             gridOrigin: SIMD2<Float>(0, 0),
             cols: UInt32(cols),
@@ -641,7 +655,7 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
 
             var cursorUniforms = GPUCursorUniforms(
                 position: SIMD2<Float>(Float(cursorCol), Float(cursorRow)),
-                cellSize: SIMD2<Float>(Float(cellWidth), Float(cellHeight)),
+                cellSize: SIMD2<Float>(cw, ch),
                 viewportSize: viewportSize,
                 color: effectiveFG,
                 style: cursorShapeValue,
@@ -1197,8 +1211,8 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
         // Sync texture cache with current snapshot state.
         syncImageTextures(snapshot: snapshot)
 
-        let cw = Float(cellWidth)
-        let ch = Float(cellHeight)
+        let cw = Float(cellWidth * currentScale)
+        let ch = Float(cellHeight * currentScale)
 
         // Sort placements by z-index for correct layering.
         let sortedPlacements = snapshot.kittyPlacements.values.sorted { $0.zIndex < $1.zIndex }

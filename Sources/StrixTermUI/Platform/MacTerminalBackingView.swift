@@ -690,7 +690,6 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
     /// Send encoded bytes to the terminal and notify the delegate.
     private func sendToTerminal(_ data: [UInt8]) {
         terminal.scrollToBottom()
-        terminal.sendInput(data)
         delegate?.terminalView(self, sendData: data)
     }
 
