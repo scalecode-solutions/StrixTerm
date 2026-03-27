@@ -129,6 +129,7 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
         ) {
             self.renderer = metalRenderer
             mtkView.delegate = metalRenderer
+            NSLog("[StrixTerm] MetalRenderer created OK. cellW=\(metalRenderer.reportedCellWidth) cellH=\(metalRenderer.reportedCellHeight) mtkView.delegate set.")
             // Use the renderer's cell metrics for accurate grid sizing
             cellWidth = metalRenderer.reportedCellWidth
             cellHeight = metalRenderer.reportedCellHeight

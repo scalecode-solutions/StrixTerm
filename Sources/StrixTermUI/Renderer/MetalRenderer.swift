@@ -237,9 +237,21 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
         previousRowHashes.removeAll()
     }
 
+    private var drawCallCount = 0
+
     public func draw(in view: MTKView) {
+        drawCallCount += 1
+        if drawCallCount <= 3 || drawCallCount % 300 == 0 {
+            NSLog("[StrixTerm Renderer] draw() call #\(drawCallCount), view size=\(view.drawableSize), snapshot next...")
+        }
+
         // 1. Take a snapshot from the terminal.
         let snapshot = terminal.snapshot()
+
+        if drawCallCount <= 3 {
+            let text = snapshot.lineText(0)
+            NSLog("[StrixTerm Renderer] snapshot: cols=\(snapshot.cols) rows=\(snapshot.rows) cursor=\(snapshot.cursorPosition) line0=\"\(text.prefix(40))\" syncOut=\(snapshot.synchronizedOutput)")
+        }
 
         // Synchronized output: skip rendering while the mode is active.
         // When the application turns off synchronized output, the next
