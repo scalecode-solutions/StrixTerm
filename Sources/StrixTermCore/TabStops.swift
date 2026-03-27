@@ -50,6 +50,7 @@ public struct TabStops: Sendable {
     /// Find the next tab stop after the given column.
     /// Returns `width - 1` if no tab stop is found.
     public func nextStop(after col: Int) -> Int {
+        guard col + 1 < width else { return max(width - 1, 0) }
         for c in (col + 1)..<width {
             if isSet(c) { return c }
         }
