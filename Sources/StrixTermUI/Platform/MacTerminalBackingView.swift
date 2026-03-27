@@ -133,6 +133,7 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
             cellWidth = metalRenderer.reportedCellWidth
             cellHeight = metalRenderer.reportedCellHeight
         } else {
+            NSLog("[StrixTerm] MetalRenderer init failed - shader loading or pipeline creation error. Falling back to font-based cell dims.")
             // Fallback: compute cell dimensions from NSFont
             updateCellDimensions()
         }

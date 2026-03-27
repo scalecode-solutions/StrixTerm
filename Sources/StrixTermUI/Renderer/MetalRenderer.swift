@@ -753,19 +753,24 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
     // MARK: - Pipeline Construction
 
     private static func makeLibrary(device: MTLDevice) -> MTLLibrary? {
-        // Try loading from the bundle (SPM resource bundle).
-        if let bundleURL = Bundle.module.url(forResource: "Shaders", withExtension: "metal"),
-           let source = try? String(contentsOf: bundleURL, encoding: .utf8),
+        // Tier 1: SPM bundles .metal files as source via .process().
+        // Compile them at runtime from the resource bundle.
+        if let sourceURL = Bundle.module.url(forResource: "Shaders", withExtension: "metal"),
+           let source = try? String(contentsOf: sourceURL, encoding: .utf8),
            let library = try? device.makeLibrary(source: source, options: nil) {
             return library
         }
-        // Fall back to default library.
-        if let library = device.makeDefaultLibrary() {
+        // Tier 2: Pre-compiled metallib in bundle (Xcode builds).
+        if let library = try? device.makeDefaultLibrary(bundle: Bundle.module) {
             return library
         }
-        // Try compiling from source as a last resort by searching in the bundle.
+        // Tier 3: Named metallib file.
         if let metalURL = Bundle.module.url(forResource: "Shaders", withExtension: "metallib"),
            let library = try? device.makeLibrary(URL: metalURL) {
+            return library
+        }
+        // Tier 4: Host app's default library.
+        if let library = device.makeDefaultLibrary() {
             return library
         }
         return nil
