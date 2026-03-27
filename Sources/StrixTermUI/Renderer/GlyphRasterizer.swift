@@ -27,22 +27,26 @@ struct RasterizedGlyph: Sendable {
 final class GlyphRasterizer {
     private let font: CTFont
     private let fontSize: CGFloat
+    /// Backing scale factor for Retina rendering.
+    let scale: CGFloat
 
     /// Padding around each glyph to prevent texture bleeding.
     private let padding: Int = 1
 
-    init(font: CTFont) {
+    init(font: CTFont, scale: CGFloat = 1.0) {
         self.font = font
         self.fontSize = CTFontGetSize(font)
+        self.scale = scale
     }
 
     /// Create a rasterizer from a font name and size.
-    convenience init(fontFamily: String, size: CGFloat) {
+    /// The font is created at `size * scale` to produce Retina-quality bitmaps.
+    convenience init(fontFamily: String, size: CGFloat, scale: CGFloat = 1.0) {
         let descriptor = CTFontDescriptorCreateWithAttributes(
             [kCTFontFamilyNameAttribute: fontFamily as CFString] as CFDictionary
         )
-        let ctFont = CTFontCreateWithFontDescriptor(descriptor, size, nil)
-        self.init(font: ctFont)
+        let ctFont = CTFontCreateWithFontDescriptor(descriptor, size * scale, nil)
+        self.init(font: ctFont, scale: scale)
     }
 
     /// The underlying CTFont.

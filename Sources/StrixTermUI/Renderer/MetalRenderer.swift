@@ -114,9 +114,11 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
     private let descent: CGFloat
     private let leading: CGFloat
 
-    /// Publicly accessible cell dimensions for grid size calculation.
-    public var reportedCellWidth: CGFloat { cellWidth }
-    public var reportedCellHeight: CGFloat { cellHeight }
+    /// Publicly accessible cell dimensions in **points** for grid size calculation.
+    /// The internal cellWidth/Height are in pixels (rasterizer scale). Divide by scale
+    /// so the view layer can compute cols = bounds.width / pointCellWidth.
+    public var reportedCellWidth: CGFloat { cellWidth / rasterizer.scale }
+    public var reportedCellHeight: CGFloat { cellHeight / rasterizer.scale }
 
     // MARK: - Default Colors
 
@@ -191,8 +193,11 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
         guard let queue = device.makeCommandQueue() else { return nil }
         self.commandQueue = queue
 
-        // Create the font and rasterizer.
-        self.rasterizer = GlyphRasterizer(fontFamily: fontFamily, size: fontSize)
+        // Create the font and rasterizer at Retina scale.
+        // The rasterizer creates the font at size * scale so glyphs are crisp.
+        // cellMetrics() then returns pixel-sized dimensions (no further scaling needed).
+        let screenScale: CGFloat = NSScreen.main?.backingScaleFactor ?? 2.0
+        self.rasterizer = GlyphRasterizer(fontFamily: fontFamily, size: fontSize, scale: screenScale)
         let metrics = rasterizer.cellMetrics()
         self.cellWidth = metrics.width
         self.cellHeight = metrics.height
@@ -295,7 +300,6 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
         )
 
         // Compute the scale factor (Retina displays have drawableSize > bounds).
-        // Cell dimensions are in points; Metal works in pixels.
         let scale: CGFloat
         if view.bounds.width > 0 {
             scale = view.drawableSize.width / view.bounds.width
@@ -322,10 +326,10 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
         bgCells.reserveCapacity(cols * rows)
         glyphCells.reserveCapacity(cols * rows)
 
-        // Cell size in pixels (points * scale for Retina).
+        // Cell dimensions are already in pixels (rasterizer created at scaled font size).
         currentScale = scale
-        let cw = Float(cellWidth * scale)
-        let ch = Float(cellHeight * scale)
+        let cw = Float(cellWidth)
+        let ch = Float(cellHeight)
 
         for row in 0..<rows {
             for col in 0..<cols {
@@ -1211,8 +1215,8 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
         // Sync texture cache with current snapshot state.
         syncImageTextures(snapshot: snapshot)
 
-        let cw = Float(cellWidth * currentScale)
-        let ch = Float(cellHeight * currentScale)
+        let cw = Float(cellWidth)
+        let ch = Float(cellHeight)
 
         // Sort placements by z-index for correct layering.
         let sortedPlacements = snapshot.kittyPlacements.values.sorted { $0.zIndex < $1.zIndex }
