@@ -424,7 +424,8 @@ extension TerminalState: TerminalEmulator {
                 buffer.cursorX = cols - 1
             }
         case 0x09: // HT - horizontal tab
-            let nextTab = buffer.tabStops.nextStop(after: buffer.cursorX)
+            let col = min(buffer.cursorX, cols - 1)
+            let nextTab = buffer.tabStops.nextStop(after: col)
             buffer.cursorX = min(nextTab, cols - 1)
         case 0x0A, 0x0B, 0x0C: // LF, VT, FF
             buffer.linefeed(modes: modes)
