@@ -62,10 +62,27 @@ final class GlyphRasterizer {
         lineSpacing: CGFloat = 1.0,
         letterSpacing: CGFloat = 0
     ) {
-        let descriptor = CTFontDescriptorCreateWithAttributes(
-            [kCTFontFamilyNameAttribute: fontFamily as CFString] as CFDictionary
-        )
-        let ctFont = CTFontCreateWithFontDescriptor(descriptor, size * scale, nil)
+        let scaledSize = size * scale
+        let exactFont = CTFontCreateWithName(fontFamily as CFString, scaledSize, nil)
+        let exactFontName = CTFontCopyPostScriptName(exactFont) as String
+
+        let ctFont: CTFont
+        if exactFontName.caseInsensitiveCompare(fontFamily) == .orderedSame ||
+            exactFontName.lowercased().contains(fontFamily.lowercased()) {
+            ctFont = exactFont
+        } else {
+            let descriptor = CTFontDescriptorCreateWithAttributes(
+                [kCTFontNameAttribute: fontFamily as CFString] as CFDictionary
+            )
+            let resolved = CTFontCreateWithFontDescriptor(descriptor, scaledSize, nil)
+            let resolvedName = CTFontCopyPostScriptName(resolved) as String
+
+            if resolvedName.lowercased().contains(fontFamily.lowercased()) {
+                ctFont = resolved
+            } else {
+                ctFont = CTFontCreateWithName("Menlo-Regular" as CFString, scaledSize, nil)
+            }
+        }
         self.init(
             font: ctFont,
             scale: scale,
