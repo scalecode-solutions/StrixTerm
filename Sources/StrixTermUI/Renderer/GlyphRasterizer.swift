@@ -108,33 +108,49 @@ final class GlyphRasterizer {
         CTFontGetBoundingRectsForGlyphs(renderFont, .default, &glyphs, &boundingRect, 1)
 
         // Skip zero-size glyphs (spaces, etc.)
-        let glyphWidth = Int(ceil(boundingRect.width)) + padding * 2
-        let glyphHeight = Int(ceil(boundingRect.height)) + padding * 2
-        if glyphWidth <= padding * 2 || glyphHeight <= padding * 2 {
+        if boundingRect.width <= 0 || boundingRect.height <= 0 {
             return nil
         }
 
-        let bearingX = boundingRect.origin.x - CGFloat(padding)
-        let bearingY = boundingRect.origin.y + boundingRect.height + CGFloat(padding)
+        var advance = CGSize.zero
+        CTFontGetAdvancesForGlyphs(renderFont, .default, &glyphs, &advance, 1)
+
+        let ascent = CTFontGetAscent(renderFont)
+        let descent = CTFontGetDescent(renderFont)
+        let contentHeight = ascent + descent
+        let normalizedLineSpacing = max(lineSpacing, 0.9)
+
+        let cellPixelWidth = Int(ceil(max(advance.width + (letterSpacing * scale), boundingRect.maxX) + CGFloat(padding * 2)))
+        let cellPixelHeight = Int(ceil(max(contentHeight * normalizedLineSpacing, boundingRect.height) + CGFloat(padding * 2)))
+
+        let verticalInset = max(0, (CGFloat(cellPixelHeight) - contentHeight) * 0.5)
+        let baselineY = descent + verticalInset + CGFloat(padding)
+        let drawX = max(CGFloat(padding), ((CGFloat(cellPixelWidth) - boundingRect.width) * 0.5) - boundingRect.origin.x)
+        let drawY = baselineY
+
+        let bearingX = 0 as CGFloat
+        let bearingY = CGFloat(cellPixelHeight)
 
         if isColored {
             return rasterizeColored(
                 glyph: glyph,
-                width: glyphWidth,
-                height: glyphHeight,
+                width: cellPixelWidth,
+                height: cellPixelHeight,
                 bearingX: bearingX,
                 bearingY: bearingY,
-                boundingRect: boundingRect,
+                drawX: drawX,
+                drawY: drawY,
                 font: renderFont
             )
         } else {
             return rasterizeGrayscale(
                 glyph: glyph,
-                width: glyphWidth,
-                height: glyphHeight,
+                width: cellPixelWidth,
+                height: cellPixelHeight,
                 bearingX: bearingX,
                 bearingY: bearingY,
-                boundingRect: boundingRect,
+                drawX: drawX,
+                drawY: drawY,
                 font: renderFont
             )
         }
@@ -147,7 +163,8 @@ final class GlyphRasterizer {
         height: Int,
         bearingX: CGFloat,
         bearingY: CGFloat,
-        boundingRect: CGRect,
+        drawX: CGFloat,
+        drawY: CGFloat,
         font: CTFont
     ) -> RasterizedGlyph? {
         let colorSpace = CGColorSpaceCreateDeviceGray()
@@ -167,10 +184,6 @@ final class GlyphRasterizer {
         context.setShouldSmoothFonts(true)
         context.setAllowsAntialiasing(true)
         context.setShouldAntialias(true)
-
-        // Position the glyph so its bounding box lands inside our bitmap.
-        let drawX = -boundingRect.origin.x + CGFloat(padding)
-        let drawY = -boundingRect.origin.y + CGFloat(padding)
 
         context.setFillColor(CGColor(gray: 1.0, alpha: 1.0))
 
@@ -199,7 +212,8 @@ final class GlyphRasterizer {
         height: Int,
         bearingX: CGFloat,
         bearingY: CGFloat,
-        boundingRect: CGRect,
+        drawX: CGFloat,
+        drawY: CGFloat,
         font: CTFont
     ) -> RasterizedGlyph? {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
@@ -219,9 +233,6 @@ final class GlyphRasterizer {
         context.setShouldSmoothFonts(true)
         context.setAllowsAntialiasing(true)
         context.setShouldAntialias(true)
-
-        let drawX = -boundingRect.origin.x + CGFloat(padding)
-        let drawY = -boundingRect.origin.y + CGFloat(padding)
 
         var glyphs = [glyph]
         var position = CGPoint(x: drawX, y: drawY)
