@@ -4,25 +4,84 @@ import StrixTermCore
 import StrixTermConfig
 
 /// Configuration for the TerminalView presentation.
+public struct TerminalThemeColor: Sendable {
+    public var red: Double
+    public var green: Double
+    public var blue: Double
+    public var alpha: Double
+
+    public init(red: Double, green: Double, blue: Double, alpha: Double = 1.0) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+        self.alpha = alpha
+    }
+}
+
+public struct TerminalTheme: Sendable {
+    public var foreground: TerminalThemeColor
+    public var background: TerminalThemeColor
+    public var cursor: TerminalThemeColor
+    public var selection: TerminalThemeColor
+    public var link: TerminalThemeColor
+
+    public init(
+        foreground: TerminalThemeColor,
+        background: TerminalThemeColor,
+        cursor: TerminalThemeColor,
+        selection: TerminalThemeColor,
+        link: TerminalThemeColor
+    ) {
+        self.foreground = foreground
+        self.background = background
+        self.cursor = cursor
+        self.selection = selection
+        self.link = link
+    }
+
+    public static let fred = TerminalTheme(
+        foreground: TerminalThemeColor(red: 0.84, green: 0.87, blue: 0.92),
+        background: TerminalThemeColor(red: 0.09, green: 0.10, blue: 0.13),
+        cursor: TerminalThemeColor(red: 0.29, green: 0.48, blue: 0.69),
+        selection: TerminalThemeColor(red: 0.12, green: 0.35, blue: 0.56, alpha: 0.34),
+        link: TerminalThemeColor(red: 0.42, green: 0.59, blue: 0.82)
+    )
+}
+
 public struct TerminalViewConfiguration: Sendable {
     public var fontFamily: String
     public var fontSize: CGFloat
+    public var lineSpacing: CGFloat
+    public var letterSpacing: CGFloat
+    public var opacity: CGFloat
     public var blinkEnabled: Bool
     public var blinkInterval: TimeInterval
     public var linkHighlightMode: LinkHighlightMode
+    public var palette: BuiltinPalette
+    public var theme: TerminalTheme
 
     public init(
         fontFamily: String = "SF Mono",
         fontSize: CGFloat = 13,
+        lineSpacing: CGFloat = 1.0,
+        letterSpacing: CGFloat = 0,
+        opacity: CGFloat = 1.0,
         blinkEnabled: Bool = true,
         blinkInterval: TimeInterval = 0.5,
-        linkHighlightMode: LinkHighlightMode = .hoverWithModifier
+        linkHighlightMode: LinkHighlightMode = .hoverWithModifier,
+        palette: BuiltinPalette = .fredDark,
+        theme: TerminalTheme = .fred
     ) {
         self.fontFamily = fontFamily
         self.fontSize = fontSize
+        self.lineSpacing = lineSpacing
+        self.letterSpacing = letterSpacing
+        self.opacity = opacity
         self.blinkEnabled = blinkEnabled
         self.blinkInterval = blinkInterval
         self.linkHighlightMode = linkHighlightMode
+        self.palette = palette
+        self.theme = theme
     }
 
     public static let `default` = TerminalViewConfiguration()

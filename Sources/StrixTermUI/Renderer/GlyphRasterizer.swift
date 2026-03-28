@@ -25,40 +25,70 @@ struct RasterizedGlyph: Sendable {
 /// for uploading to a Metal texture atlas.
 @MainActor
 final class GlyphRasterizer {
+    struct ResolvedGlyph {
+        let font: CTFont
+        let glyph: CGGlyph
+    }
+
     private let font: CTFont
     private let fontSize: CGFloat
+    private let lineSpacing: CGFloat
+    private let letterSpacing: CGFloat
     /// Backing scale factor for Retina rendering.
     let scale: CGFloat
 
     /// Padding around each glyph to prevent texture bleeding.
     private let padding: Int = 1
 
-    init(font: CTFont, scale: CGFloat = 1.0) {
+    init(
+        font: CTFont,
+        scale: CGFloat = 1.0,
+        lineSpacing: CGFloat = 1.0,
+        letterSpacing: CGFloat = 0
+    ) {
         self.font = font
         self.fontSize = CTFontGetSize(font)
         self.scale = scale
+        self.lineSpacing = lineSpacing
+        self.letterSpacing = letterSpacing
     }
 
     /// Create a rasterizer from a font name and size.
     /// The font is created at `size * scale` to produce Retina-quality bitmaps.
-    convenience init(fontFamily: String, size: CGFloat, scale: CGFloat = 1.0) {
+    convenience init(
+        fontFamily: String,
+        size: CGFloat,
+        scale: CGFloat = 1.0,
+        lineSpacing: CGFloat = 1.0,
+        letterSpacing: CGFloat = 0
+    ) {
         let descriptor = CTFontDescriptorCreateWithAttributes(
             [kCTFontFamilyNameAttribute: fontFamily as CFString] as CFDictionary
         )
         let ctFont = CTFontCreateWithFontDescriptor(descriptor, size * scale, nil)
-        self.init(font: ctFont, scale: scale)
+        self.init(
+            font: ctFont,
+            scale: scale,
+            lineSpacing: lineSpacing,
+            letterSpacing: letterSpacing
+        )
     }
 
     /// The underlying CTFont.
     var ctFont: CTFont { font }
 
     /// Rasterize a single glyph. Returns nil if the glyph has no visual representation.
-    func rasterize(glyph: CGGlyph, isColored: Bool = false) -> RasterizedGlyph? {
+    func rasterize(
+        glyph: CGGlyph,
+        font overrideFont: CTFont? = nil,
+        isColored: Bool = false
+    ) -> RasterizedGlyph? {
+        let renderFont = overrideFont ?? font
         var glyphs = [glyph]
 
         // Get glyph bounding rect
         var boundingRect = CGRect.zero
-        CTFontGetBoundingRectsForGlyphs(font, .default, &glyphs, &boundingRect, 1)
+        CTFontGetBoundingRectsForGlyphs(renderFont, .default, &glyphs, &boundingRect, 1)
 
         // Skip zero-size glyphs (spaces, etc.)
         let glyphWidth = Int(ceil(boundingRect.width)) + padding * 2
@@ -77,7 +107,8 @@ final class GlyphRasterizer {
                 height: glyphHeight,
                 bearingX: bearingX,
                 bearingY: bearingY,
-                boundingRect: boundingRect
+                boundingRect: boundingRect,
+                font: renderFont
             )
         } else {
             return rasterizeGrayscale(
@@ -86,7 +117,8 @@ final class GlyphRasterizer {
                 height: glyphHeight,
                 bearingX: bearingX,
                 bearingY: bearingY,
-                boundingRect: boundingRect
+                boundingRect: boundingRect,
+                font: renderFont
             )
         }
     }
@@ -98,7 +130,8 @@ final class GlyphRasterizer {
         height: Int,
         bearingX: CGFloat,
         bearingY: CGFloat,
-        boundingRect: CGRect
+        boundingRect: CGRect,
+        font: CTFont
     ) -> RasterizedGlyph? {
         let colorSpace = CGColorSpaceCreateDeviceGray()
         guard let context = CGContext(
@@ -149,7 +182,8 @@ final class GlyphRasterizer {
         height: Int,
         bearingX: CGFloat,
         bearingY: CGFloat,
-        boundingRect: CGRect
+        boundingRect: CGRect,
+        font: CTFont
     ) -> RasterizedGlyph? {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let context = CGContext(
@@ -204,8 +238,9 @@ final class GlyphRasterizer {
         var advance = CGSize.zero
         CTFontGetAdvancesForGlyphs(font, .default, &glyph, &advance, 1)
 
-        let cellWidth = ceil(advance.width)
-        let cellHeight = ceil(ascent + descent + leading)
+        let cellWidth = ceil(advance.width + (letterSpacing * scale))
+        let baseHeight = ascent + descent + leading
+        let cellHeight = ceil(baseHeight * max(lineSpacing, 1.0))
 
         return (cellWidth, cellHeight, descent, leading)
     }
@@ -228,20 +263,28 @@ final class GlyphRasterizer {
 
     /// Get the CGGlyph for a given unicode scalar.
     func glyphForScalar(_ scalar: Unicode.Scalar) -> CGGlyph {
+        resolvedGlyph(for: scalar).glyph
+    }
+
+    /// Resolve a font/glyph pair for a unicode scalar using CoreText fallback.
+    func resolvedGlyph(for scalar: Unicode.Scalar) -> ResolvedGlyph {
         let value = scalar.value
+        let string = String(scalar)
+        let resolvedFont = CTFontCreateForString(font, string as CFString, CFRangeMake(0, string.utf16.count))
+
         if value <= 0xFFFF {
             var characters: [UniChar] = [UniChar(value)]
             var glyph: CGGlyph = 0
-            CTFontGetGlyphsForCharacters(font, &characters, &glyph, 1)
-            return glyph
+            CTFontGetGlyphsForCharacters(resolvedFont, &characters, &glyph, 1)
+            return ResolvedGlyph(font: resolvedFont, glyph: glyph)
         } else {
             // Handle supplementary plane characters via surrogate pair
             let hi = UniChar(0xD800 + ((value - 0x10000) >> 10))
             let lo = UniChar(0xDC00 + ((value - 0x10000) & 0x3FF))
             var characters: [UniChar] = [hi, lo]
             var glyphs: [CGGlyph] = [0, 0]
-            CTFontGetGlyphsForCharacters(font, &characters, &glyphs, 2)
-            return glyphs[0]
+            CTFontGetGlyphsForCharacters(resolvedFont, &characters, &glyphs, 2)
+            return ResolvedGlyph(font: resolvedFont, glyph: glyphs[0])
         }
     }
 

@@ -51,7 +51,11 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
     public weak var delegate: MacTerminalViewDelegate?
 
     /// The view configuration (font, colors, etc.).
-    public var configuration: TerminalViewConfiguration
+    public var configuration: TerminalViewConfiguration {
+        didSet {
+            applyConfiguration()
+        }
+    }
 
     /// Cell dimensions in points, used for grid size calculations.
     public var cellWidth: CGFloat = 8.0
@@ -73,6 +77,7 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
     // Link hover state
     private var isHoveringLink: Bool = false
     private var hoveredLinkURL: String?
+    private var isTerminalFocused: Bool = true
 
     /// The Metal renderer, if available. Set by the view layer for link highlighting.
     public var renderer: MetalRenderer?
@@ -106,7 +111,8 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
 
     private func setupView() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor.black.cgColor
+        layer?.backgroundColor = nsColor(for: configuration.theme.background).cgColor
+        postsFrameChangedNotifications = true
 
         // Create the Metal view
         guard let device = MTLCreateSystemDefaultDevice() else { return }
@@ -125,7 +131,9 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
             device: device,
             terminal: terminal,
             fontFamily: configuration.fontFamily,
-            fontSize: configuration.fontSize
+            fontSize: configuration.fontSize,
+            lineSpacing: configuration.lineSpacing,
+            letterSpacing: configuration.letterSpacing
         ) {
             self.renderer = metalRenderer
             mtkView.delegate = metalRenderer
@@ -138,6 +146,10 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
             // Fallback: compute cell dimensions from NSFont
             updateCellDimensions()
         }
+
+        applyConfiguration()
+        refreshFocusState()
+        installWindowObservers()
     }
 
     /// Recompute cell dimensions from the current font configuration.
@@ -148,8 +160,60 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
             attributes: [.font: font]
         )
         let size = sampleString.size()
-        cellWidth = ceil(size.width)
-        cellHeight = ceil(size.height)
+        cellWidth = ceil(size.width + configuration.letterSpacing)
+        cellHeight = ceil(size.height * max(configuration.lineSpacing, 1.0))
+    }
+
+    private func applyConfiguration() {
+        layer?.backgroundColor = nsColor(
+            for: configuration.theme.background,
+            opacityMultiplier: configuration.opacity
+        ).cgColor
+        terminal.setPalette(configuration.palette.palette)
+
+        renderer?.setDefaultForeground(
+            r: Float(configuration.theme.foreground.red),
+            g: Float(configuration.theme.foreground.green),
+            b: Float(configuration.theme.foreground.blue),
+            a: Float(configuration.theme.foreground.alpha)
+        )
+        renderer?.setDefaultBackground(
+            r: Float(configuration.theme.background.red),
+            g: Float(configuration.theme.background.green),
+            b: Float(configuration.theme.background.blue),
+            a: Float(configuration.theme.background.alpha * configuration.opacity)
+        )
+        renderer?.setCursorColor(
+            r: Float(configuration.theme.cursor.red),
+            g: Float(configuration.theme.cursor.green),
+            b: Float(configuration.theme.cursor.blue),
+            a: Float(configuration.theme.cursor.alpha)
+        )
+        renderer?.setSelectionColor(
+            r: Float(configuration.theme.selection.red),
+            g: Float(configuration.theme.selection.green),
+            b: Float(configuration.theme.selection.blue),
+            a: Float(configuration.theme.selection.alpha)
+        )
+        renderer?.setLinkColor(
+            r: Float(configuration.theme.link.red),
+            g: Float(configuration.theme.link.green),
+            b: Float(configuration.theme.link.blue),
+            a: Float(configuration.theme.link.alpha)
+        )
+        renderer?.setFocused(isTerminalFocused)
+
+        needsDisplay = true
+        metalView?.setNeedsDisplay(metalView?.bounds ?? .zero)
+    }
+
+    private func nsColor(for color: TerminalThemeColor, opacityMultiplier: CGFloat = 1.0) -> NSColor {
+        NSColor(
+            red: CGFloat(color.red),
+            green: CGFloat(color.green),
+            blue: CGFloat(color.blue),
+            alpha: CGFloat(color.alpha) * opacityMultiplier
+        )
     }
 
     // MARK: - Layout
@@ -183,6 +247,7 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
         if result && terminal.sendsFocusEvents {
             delegate?.terminalView(self, sendData: Array("\u{1b}[I".utf8))
         }
+        refreshFocusState()
         return result
     }
 
@@ -190,7 +255,14 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
         if terminal.sendsFocusEvents {
             delegate?.terminalView(self, sendData: Array("\u{1b}[O".utf8))
         }
+        refreshFocusState()
         return super.resignFirstResponder()
+    }
+
+    public override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        installWindowObservers()
+        refreshFocusState()
     }
 
     // MARK: - Keyboard Input
@@ -623,8 +695,12 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
     /// Flash the view background briefly for a visual bell effect.
     public func visualBell() {
         let flashLayer = CALayer()
-        flashLayer.backgroundColor = NSColor.white.withAlphaComponent(0.15).cgColor
+        flashLayer.backgroundColor = nsColor(
+            for: configuration.theme.link,
+            opacityMultiplier: 0.18
+        ).cgColor
         flashLayer.frame = bounds
+        flashLayer.cornerRadius = 12
         layer?.addSublayer(flashLayer)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             flashLayer.removeFromSuperlayer()
@@ -691,6 +767,40 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
     private func sendToTerminal(_ data: [UInt8]) {
         terminal.scrollToBottom()
         delegate?.terminalView(self, sendData: data)
+    }
+
+    private func installWindowObservers() {
+        NotificationCenter.default.removeObserver(self)
+        guard let window else { return }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleWindowFocusChange),
+            name: NSWindow.didBecomeKeyNotification,
+            object: window
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleWindowFocusChange),
+            name: NSWindow.didResignKeyNotification,
+            object: window
+        )
+    }
+
+    @objc private func handleWindowFocusChange() {
+        refreshFocusState()
+    }
+
+    private func refreshFocusState() {
+        let isWindowFocused = window?.isKeyWindow ?? true
+        let focused = isWindowFocused && (window?.firstResponder === self)
+        guard focused != isTerminalFocused else { return }
+        isTerminalFocused = focused
+        renderer?.setFocused(focused)
+        metalView?.setNeedsDisplay(metalView?.bounds ?? .zero)
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     // MARK: - Scrollbar

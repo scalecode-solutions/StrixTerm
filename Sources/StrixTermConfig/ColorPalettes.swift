@@ -4,6 +4,7 @@ import StrixTermCore
 /// Addresses issue #391 (add support for picking built-in color palettes).
 public enum BuiltinPalette: String, CaseIterable, Sendable {
     case xterm
+    case fredDark = "fred-dark"
     case solarizedDark = "solarized-dark"
     case solarizedLight = "solarized-light"
     case dracula
@@ -27,6 +28,18 @@ public enum BuiltinPalette: String, CaseIterable, Sendable {
         switch self {
         case .xterm:
             return ColorPalette.xterm.colors
+
+        case .fredDark:
+            return [
+                PaletteEntry(hex: 0x191B22), PaletteEntry(hex: 0xD36A6A),
+                PaletteEntry(hex: 0x8FB574), PaletteEntry(hex: 0xC2A86C),
+                PaletteEntry(hex: 0x4A7BAF), PaletteEntry(hex: 0xA37ACC),
+                PaletteEntry(hex: 0x5E9AA8), PaletteEntry(hex: 0xD5DBE6),
+                PaletteEntry(hex: 0x5B6373), PaletteEntry(hex: 0xE28B8B),
+                PaletteEntry(hex: 0xA9C98E), PaletteEntry(hex: 0xD6BF87),
+                PaletteEntry(hex: 0x6A96C3), PaletteEntry(hex: 0xB995D8),
+                PaletteEntry(hex: 0x7FB4C0), PaletteEntry(hex: 0xF0F4FA),
+            ]
 
         case .solarizedDark:
             return [

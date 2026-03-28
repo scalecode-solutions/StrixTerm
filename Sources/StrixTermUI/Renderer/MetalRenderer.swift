@@ -124,6 +124,10 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
 
     private var defaultFG: SIMD4<Float> = SIMD4<Float>(0.9, 0.9, 0.9, 1.0)
     private var defaultBG: SIMD4<Float> = SIMD4<Float>(0.0, 0.0, 0.0, 1.0)
+    private var cursorColor: SIMD4<Float> = SIMD4<Float>(0.4, 0.6, 1.0, 1.0)
+    private var selectionColor: SIMD4<Float> = SIMD4<Float>(0.3, 0.5, 0.9, 0.35)
+    private var linkColor: SIMD4<Float> = SIMD4<Float>(0.4, 0.6, 1.0, 1.0)
+    private var isFocused: Bool = true
 
     // MARK: - Blink State
 
@@ -184,7 +188,9 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
         device: MTLDevice,
         terminal: Terminal,
         fontFamily: String = "SF Mono",
-        fontSize: CGFloat = 13
+        fontSize: CGFloat = 13,
+        lineSpacing: CGFloat = 1.0,
+        letterSpacing: CGFloat = 0
     ) {
         self.device = device
         self.terminal = terminal
@@ -197,7 +203,13 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
         // The rasterizer creates the font at size * scale so glyphs are crisp.
         // cellMetrics() then returns pixel-sized dimensions (no further scaling needed).
         let screenScale: CGFloat = NSScreen.main?.backingScaleFactor ?? 2.0
-        self.rasterizer = GlyphRasterizer(fontFamily: fontFamily, size: fontSize, scale: screenScale)
+        self.rasterizer = GlyphRasterizer(
+            fontFamily: fontFamily,
+            size: fontSize,
+            scale: screenScale,
+            lineSpacing: lineSpacing,
+            letterSpacing: letterSpacing
+        )
         let metrics = rasterizer.cellMetrics()
         self.cellWidth = metrics.width
         self.cellHeight = metrics.height
@@ -369,7 +381,7 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
 
                 // Apply link color tint for hovered links.
                 if isHoveredLink {
-                    fgColor = SIMD4<Float>(0.4, 0.6, 1.0, 1.0)  // Blue link color
+                    fgColor = linkColor
                 }
 
                 // Handle inverse video.
@@ -410,13 +422,18 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
                     for w in 0..<effectiveWidth {
                         let pos = Position(col: col + w, row: row)
                         if selection.contains(pos) {
-                            let selectionColor = SIMD4<Float>(0.3, 0.5, 0.9, 0.35)
                             let px = Float(col + w) * cw
                             let py = Float(row) * ch
+                            let highlightOpacity: Float = isFocused ? 1.0 : 0.72
                             decorationQuads.append(GPUDecorationData(
                                 pixelPosition: SIMD2<Float>(px, py),
                                 pixelSize: SIMD2<Float>(cw, ch),
-                                color: selectionColor
+                                color: SIMD4<Float>(
+                                    selectionColor.x,
+                                    selectionColor.y,
+                                    selectionColor.z,
+                                    selectionColor.w * highlightOpacity
+                                )
                             ))
                         }
                     }
@@ -468,7 +485,6 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
 
                 // Link hover underline decoration.
                 if isHoveredLink {
-                    let linkColor = SIMD4<Float>(0.4, 0.6, 1.0, 1.0)
                     buildUnderlineQuads(
                         style: .single,
                         x: cellPx, y: cellPy,
@@ -657,11 +673,17 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
             }
             let cursorBlinkPhase: Float = snapshot.cursorStyle.blinks ? blinkPhase : 1.0
 
+            let resolvedCursorColor = SIMD4<Float>(
+                cursorColor.x,
+                cursorColor.y,
+                cursorColor.z,
+                cursorColor.w * (isFocused ? 1.0 : 0.58)
+            )
             var cursorUniforms = GPUCursorUniforms(
                 position: SIMD2<Float>(Float(cursorCol), Float(cursorRow)),
                 cellSize: SIMD2<Float>(cw, ch),
                 viewportSize: viewportSize,
-                color: effectiveFG,
+                color: resolvedCursorColor,
                 style: cursorShapeValue,
                 blinkPhase: cursorBlinkPhase
             )
@@ -761,9 +783,14 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
         let space: Unicode.Scalar = " "
         let scalar = Unicode.Scalar(key.codePoint) ?? space
         let isColorGlyph = rasterizer.hasColorGlyph(for: scalar)
-        let cgGlyph = rasterizer.glyphForScalar(scalar)
+        let resolvedGlyph = rasterizer.resolvedGlyph(for: scalar)
+        let cgGlyph = resolvedGlyph.glyph
 
-        guard let rasterized = rasterizer.rasterize(glyph: cgGlyph, isColored: isColorGlyph) else {
+        guard let rasterized = rasterizer.rasterize(
+            glyph: cgGlyph,
+            font: resolvedGlyph.font,
+            isColored: isColorGlyph
+        ) else {
             return nil
         }
 
@@ -893,6 +920,22 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
     /// Update the default background color.
     public func setDefaultBackground(r: Float, g: Float, b: Float, a: Float = 1.0) {
         defaultBG = SIMD4<Float>(r, g, b, a)
+    }
+
+    public func setCursorColor(r: Float, g: Float, b: Float, a: Float = 1.0) {
+        cursorColor = SIMD4<Float>(r, g, b, a)
+    }
+
+    public func setSelectionColor(r: Float, g: Float, b: Float, a: Float = 1.0) {
+        selectionColor = SIMD4<Float>(r, g, b, a)
+    }
+
+    public func setLinkColor(r: Float, g: Float, b: Float, a: Float = 1.0) {
+        linkColor = SIMD4<Float>(r, g, b, a)
+    }
+
+    public func setFocused(_ focused: Bool) {
+        isFocused = focused
     }
 
     /// Get the cell size in points.

@@ -20,44 +20,128 @@ struct ContentView: View {
     @StateObject private var session = TerminalSession()
 
     var body: some View {
-        TerminalView(
-            terminal: session.terminal,
-            configuration: TerminalViewConfiguration(
-                fontFamily: "Menlo",
-                fontSize: 14
-            ),
-            onSendData: { data in
-                session.process.send(data)
-            },
-            onSizeChanged: { size in
-                session.terminal.resize(cols: size.cols, rows: size.rows)
-                session.process.setWindowSize(size)
-            },
-            onTitleChanged: { title in
-                // Window title updates handled by SwiftUI
-            },
-            onOpenURL: { urlString in
-                if let url = URL(string: urlString) {
-                    NSWorkspace.shared.open(url)
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.12, green: 0.13, blue: 0.16),
+                    Color(red: 0.09, green: 0.10, blue: 0.13)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    HStack(spacing: 10) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.white.opacity(0.05))
+                                .frame(width: 28, height: 28)
+                            Image(systemName: "terminal")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(Color.white.opacity(0.78))
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(session.windowTitle)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(Color.white.opacity(0.9))
+                                .lineLimit(1)
+                            Text(session.currentDirectory)
+                                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                .foregroundColor(Color.white.opacity(0.5))
+                                .lineLimit(1)
+                        }
+
+                        Spacer()
+
+                        HStack(spacing: 8) {
+                            HeaderBadge(label: session.shellName, tint: Color.white.opacity(0.62))
+                            HeaderBadge(label: "fred-dark", tint: Color(red: 0.42, green: 0.59, blue: 0.82))
+                            HeaderBadge(label: "\(session.terminalSize.cols)x\(session.terminalSize.rows)", tint: Color.white.opacity(0.58))
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+
+                    Divider()
+                        .overlay(Color.white.opacity(0.06))
                 }
+                .background(Color.white.opacity(0.03))
+
+                TerminalView(
+                    terminal: session.terminal,
+                    configuration: TerminalViewConfiguration(
+                        fontFamily: "SF Mono",
+                        fontSize: 13,
+                        lineSpacing: 1.08,
+                        letterSpacing: 0.25,
+                        opacity: 0.98,
+                        palette: .fredDark,
+                        theme: .fred
+                    ),
+                    onSendData: { data in
+                        session.process.send(data)
+                    },
+                    onSizeChanged: { size in
+                        session.terminalSize = size
+                        session.terminal.resize(cols: size.cols, rows: size.rows)
+                        session.process.setWindowSize(size)
+                    },
+                    onTitleChanged: { title in
+                        session.windowTitle = title.isEmpty ? "Shell" : title
+                    },
+                    onOpenURL: { urlString in
+                        if let url = URL(string: urlString) {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                )
             }
-        )
-        .background(Color.black)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.25), radius: 24, y: 14)
+            .padding(18)
+        }
         .onAppear {
             session.start()
         }
     }
 }
 
+private struct HeaderBadge: View {
+    let label: String
+    let tint: Color
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .foregroundColor(tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(Color.white.opacity(0.06)))
+    }
+}
+
 /// Manages the terminal + child process lifecycle.
 @MainActor
 final class TerminalSession: ObservableObject {
+    @Published var windowTitle = "Shell"
+    @Published var currentDirectory = NSHomeDirectory()
+    @Published var shellName = "zsh"
+    @Published var terminalSize = TerminalSize(cols: 80, rows: 25)
+
     let terminal: Terminal
     let process: ProcessHost
 
     init() {
         terminal = Terminal(cols: 80, rows: 25, maxScrollback: 10_000)
         process = ProcessHost()
+        terminalSize = terminal.size
     }
 
     func start() {
@@ -69,6 +153,7 @@ final class TerminalSession: ObservableObject {
 
         // Find the user's shell
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        shellName = URL(fileURLWithPath: shell).lastPathComponent
 
         do {
             try process.start(
@@ -122,7 +207,9 @@ extension TerminalSession: TerminalDelegate {
                     pb.setString(str, forType: .string)
                 }
             case .setTitle(let title):
-                _ = title  // Window title updates handled by SwiftUI
+                DispatchQueue.main.async { [weak self] in
+                    self?.windowTitle = title.isEmpty ? "Shell" : title
+                }
             default:
                 break
             }

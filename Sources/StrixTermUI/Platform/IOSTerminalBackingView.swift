@@ -133,7 +133,9 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
                 device: device,
                 terminal: terminal,
                 fontFamily: configuration.fontFamily,
-                fontSize: configuration.fontSize
+                fontSize: configuration.fontSize,
+                lineSpacing: configuration.lineSpacing,
+                letterSpacing: configuration.letterSpacing
             )
             if let renderer = renderer {
                 mtkView.delegate = renderer
@@ -157,8 +159,8 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
             attributes: [.font: font]
         )
         let size = sampleString.size()
-        cellWidth = ceil(size.width)
-        cellHeight = ceil(size.height)
+        cellWidth = ceil(size.width + configuration.letterSpacing)
+        cellHeight = ceil(size.height * max(configuration.lineSpacing, 1.0))
     }
 
     // MARK: - Gesture Setup

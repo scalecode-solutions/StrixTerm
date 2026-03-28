@@ -174,6 +174,14 @@ public final class Terminal: @unchecked Sendable {
         return state.promptState
     }
 
+    /// Replace the active 256-color palette.
+    public func setPalette(_ palette: ColorPalette) {
+        lock.lock()
+        state.palette = palette
+        lock.unlock()
+        delegate?.terminalNeedsDisplay(self)
+    }
+
     /// Whether application cursor keys mode is active.
     public var applicationCursorKeys: Bool {
         lock.lock()
