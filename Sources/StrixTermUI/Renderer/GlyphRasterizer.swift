@@ -230,9 +230,10 @@ final class GlyphRasterizer {
         let descent = CTFontGetDescent(font)
         let leading = CTFontGetLeading(font)
 
-        // Use the font's advancement of '0' or 'M' for cell width
+        // Use the digit zero for a more representative terminal cell width.
+        // `M` tends to produce roomier cells than modern terminal layouts want.
         var glyph: CGGlyph = 0
-        var characters: [UniChar] = [0x004D] // 'M'
+        var characters: [UniChar] = [0x0030] // '0'
         CTFontGetGlyphsForCharacters(font, &characters, &glyph, 1)
 
         var advance = CGSize.zero
@@ -240,7 +241,8 @@ final class GlyphRasterizer {
 
         let cellWidth = ceil(advance.width + (letterSpacing * scale))
         let baseHeight = ascent + descent + leading
-        let cellHeight = ceil(baseHeight * max(lineSpacing, 1.0))
+        let normalizedLineSpacing = max(lineSpacing, 0.9)
+        let cellHeight = ceil(baseHeight * normalizedLineSpacing)
 
         return (cellWidth, cellHeight, descent, leading)
     }
