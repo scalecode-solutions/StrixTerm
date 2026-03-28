@@ -38,7 +38,7 @@ public struct AppearanceSettings: Codable, Sendable {
     public var letterSpacing: Double
 
     public init(
-        fontFamily: String = "SF Mono",
+        fontFamily: String = "Menlo",
         fontSize: Double = 13,
         colorPalette: String = "xterm",
         cursorStyle: String = "blinkBlock",

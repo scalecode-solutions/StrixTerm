@@ -61,7 +61,7 @@ public struct TerminalViewConfiguration: Sendable {
     public var theme: TerminalTheme
 
     public init(
-        fontFamily: String = "SF Mono",
+        fontFamily: String = "Menlo",
         fontSize: CGFloat = 13,
         lineSpacing: CGFloat = 1.0,
         letterSpacing: CGFloat = 0,

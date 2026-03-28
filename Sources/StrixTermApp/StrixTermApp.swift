@@ -73,7 +73,7 @@ struct ContentView: View {
                 TerminalView(
                     terminal: session.terminal,
                     configuration: TerminalViewConfiguration(
-                        fontFamily: "SF Mono",
+                        fontFamily: "Menlo",
                         fontSize: 13,
                         lineSpacing: 1.08,
                         letterSpacing: 0.25,

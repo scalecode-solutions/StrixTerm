@@ -154,14 +154,23 @@ public class MacTerminalBackingView: NSView, @preconcurrency NSTextInputClient {
 
     /// Recompute cell dimensions from the current font configuration.
     private func updateCellDimensions() {
-        let font = NSFont.monospacedSystemFont(ofSize: configuration.fontSize, weight: .regular)
+        let font = fallbackFont()
         let sampleString = NSAttributedString(
-            string: "M",
+            string: "0",
             attributes: [.font: font]
         )
         let size = sampleString.size()
         cellWidth = ceil(size.width + configuration.letterSpacing)
-        cellHeight = ceil(size.height * max(configuration.lineSpacing, 1.0))
+        cellHeight = ceil(size.height * max(configuration.lineSpacing, 0.9))
+    }
+
+    private func fallbackFont() -> NSFont {
+        if let configuredFont = NSFont(name: configuration.fontFamily, size: configuration.fontSize) {
+            return configuredFont
+        }
+
+        return NSFont(name: "Menlo", size: configuration.fontSize)
+            ?? NSFont.monospacedSystemFont(ofSize: configuration.fontSize, weight: .regular)
     }
 
     private func applyConfiguration() {

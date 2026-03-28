@@ -182,12 +182,12 @@ public final class MetalRenderer: NSObject, MTKViewDelegate {
     /// - Parameters:
     ///   - device: The Metal device to use.
     ///   - terminal: The terminal whose state will be rendered.
-    ///   - fontFamily: The font family name (e.g. "SF Mono", "Menlo").
+    ///   - fontFamily: The font family name (e.g. "Menlo", "SF Mono").
     ///   - fontSize: The font size in points.
     public init?(
         device: MTLDevice,
         terminal: Terminal,
-        fontFamily: String = "SF Mono",
+        fontFamily: String = "Menlo",
         fontSize: CGFloat = 13,
         lineSpacing: CGFloat = 1.0,
         letterSpacing: CGFloat = 0

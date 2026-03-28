@@ -153,14 +153,23 @@ public class IOSTerminalBackingView: UIView, UIKeyInput, UITextInputTraits {
 
     /// Recompute cell dimensions from the current font configuration.
     private func updateCellDimensions() {
-        let font = UIFont.monospacedSystemFont(ofSize: configuration.fontSize, weight: .regular)
+        let font = fallbackFont()
         let sampleString = NSAttributedString(
-            string: "M",
+            string: "0",
             attributes: [.font: font]
         )
         let size = sampleString.size()
         cellWidth = ceil(size.width + configuration.letterSpacing)
-        cellHeight = ceil(size.height * max(configuration.lineSpacing, 1.0))
+        cellHeight = ceil(size.height * max(configuration.lineSpacing, 0.9))
+    }
+
+    private func fallbackFont() -> UIFont {
+        if let configuredFont = UIFont(name: configuration.fontFamily, size: configuration.fontSize) {
+            return configuredFont
+        }
+
+        return UIFont(name: "Menlo", size: configuration.fontSize)
+            ?? UIFont.monospacedSystemFont(ofSize: configuration.fontSize, weight: .regular)
     }
 
     // MARK: - Gesture Setup
